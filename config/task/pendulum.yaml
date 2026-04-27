@@ -1,0 +1,31 @@
+_target_: tasks.pendulum.HiddenPendulum
+
+name: Pendulum
+
+dim_x: 1
+dim_y: 2
+
+embedding_type: theta
+mask_type: ["all"]
+
+n_selected_targets: null
+predefined_masks: null
+predefined_mask_weights: null
+mask_index: null
+attend_to: null
+
+n_target_data: 0
+n_target_theta: 3
+
+n_context_init: 1
+n_query_init: 200
+
+design_scale: 1.0
+outcome_scale: 1.0
+
+dim_theta: 3
+dt: 0.05
+theta_family: normal
+
+device: ${device}
+training: true

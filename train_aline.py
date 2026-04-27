@@ -1,4 +1,6 @@
 import torch
+import os
+
 from torch import optim
 from torch.optim import lr_scheduler
 from torch.nn.utils import clip_grad_norm_
@@ -201,12 +203,32 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
 
 @hydra.main(version_base=None, config_path="./config", config_name="train")
 def main(cfg):
-    # Setting device
-    if not torch.cuda.is_available():
-        cfg.device = "cpu"
-    torch.set_default_device(cfg.device)
-    if cfg.device == "cuda":
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+    # Device setup
+    requested_device = str(cfg.device)
+
+    print("Requested device:", requested_device)
+    print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
+    print("torch.cuda.is_available():", torch.cuda.is_available())
+    print("torch.cuda.device_count():", torch.cuda.device_count())
+    print("torch.version.cuda:", torch.version.cuda)
+
+    if requested_device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"cfg.device={requested_device}, but CUDA is not available. "
+                f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}, "
+                f"torch.version.cuda={torch.version.cuda}"
+            )
+        device = torch.device(requested_device)
+    else:
+        device = torch.device("cpu")
+
+    cfg.device = str(device)
+    torch.set_default_device(device)
+
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+        print("Using GPU:", torch.cuda.get_device_name(device))
 
     # Setting random seed
     if cfg.fix_seed:
