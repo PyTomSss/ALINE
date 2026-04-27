@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Optional
 from attrdictionary import AttrDict
 
 
