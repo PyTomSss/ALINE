@@ -197,13 +197,31 @@ def eval_boed(model, experiment, T=30, L=int(1e6), M=2000, batch_size=40, time_t
 
     return bounds
 
-def compute_ll(value: torch.Tensor, means: torch.Tensor, stds: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+def compute_ll(
+    value: torch.Tensor,
+    means: torch.Tensor,
+    stds: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
     """
-    Computes log-likelihood loss for a Gaussian mixture model.
+    Computes coordinate-wise log-likelihood for a Gaussian mixture model.
+
+    Args:
+        value:   [B, n_target]
+        means:   [B, n_target, C]
+        stds:    [B, n_target, C]
+        weights: [B, n_target, C]
+
+    Returns:
+        log_likelihood: [B, n_target]
     """
+    if value.ndim == means.ndim - 1:
+        value = value.unsqueeze(-1)
+
     components = Normal(means, stds, validate_args=False)
     log_probs = components.log_prob(value)
-    weighted_log_probs = log_probs + torch.log(weights)
+
+    weighted_log_probs = log_probs + torch.log(weights.clamp_min(1e-12))
     return torch.logsumexp(weighted_log_probs, dim=-1)
 
 

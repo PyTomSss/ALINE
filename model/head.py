@@ -44,6 +44,7 @@ class AcquisitionHead(nn.Module):
         return self.predictor(z)
     
 
+
 class ContinuousAcquisitionHead(nn.Module):
     def __init__(self, dim_embedding: int, dim_feedforward: int, dim_x: int, time_token: bool, **kwargs: Any) -> None:
         super().__init__()
@@ -81,6 +82,7 @@ class ContinuousAcquisitionHead(nn.Module):
         return mean, std
     
 
+
 class ValueHead(nn.Module):
     def __init__(self, dim_embedding: int, dim_feedforward: int, **kwargs: Any) -> None:
         super().__init__()
@@ -114,8 +116,17 @@ class ValueHead(nn.Module):
 
 class GMMTargetHead(nn.Module):
     """
-    Target head that predicts the posterior distribution for the target data
+    Target head predicting a univariate GMM per target token.
+
+    Input:
+        z_target: [B, n_target, dim_embedding]
+
+    Output:
+        mixture_means:   [B, n_target, num_components]
+        mixture_stds:    [B, n_target, num_components]
+        mixture_weights: [B, n_target, num_components]
     """
+
     def __init__(
         self,
         dim_y: int,
@@ -124,147 +135,104 @@ class GMMTargetHead(nn.Module):
         num_components: int,
         single_head: bool = False,
         std_min: float = 1e-4,
-        **kwargs: Any
-        ) -> None:
-        """
-        Initialize the target head
-        
-        Args:
-            dim_y: Dimension of output y
-            dim_embedding: Dimension of embedding vectors
-            dim_feedforward: Dimension of feedforward layer
-            num_components: Number of components in the GMM
-            single_head: Whether to use a single head or multiple heads
-            std_min: Minimum standard deviation for the GMM
-        """
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
+
         self.dim_embedding = dim_embedding
         self.dim_feedforward = dim_feedforward
+
+        # Kept for backward compatibility, but no longer used as an output multiplier.
         self.dim_y = dim_y
+
         self.single_head = single_head
         self.num_components = num_components
-        self.heads = self.initialize_head(self.dim_embedding, self.dim_feedforward, self.dim_y, self.single_head,
-                                          num_components)
-
         self.std_min = std_min
-        # TODO: support multi-output case
+
+        self.heads = self.initialize_head(
+            dim_embedding=self.dim_embedding,
+            dim_feedforward=self.dim_feedforward,
+            single_head=self.single_head,
+            num_components=self.num_components,
+        )
 
     def forward(self, batch: AttrDict, z_target: torch.Tensor) -> AttrDict:
         """
-        Forward pass through the target head
-        
-        Args:
-            batch: Batch containing context and target data
-            z_target: Embedding tensor [B, N, dim_embedding] where N = n_target
-        
-        Returns:
-            outs: AttrDict containing posterior distribution parameters
+        z_target: [B, n_target, dim_embedding]
         """
-        # Iterate over each head to get their outputs
         if self.single_head:
-            output = self.heads(z_target)
+            output = self.heads(z_target)  # [B, n_target, 3 * C] or [B, n_target, 2] if C=1
+
             if self.num_components == 1:
                 raw_mean, raw_std = torch.chunk(output, 2, dim=-1)
-                raw_weights = torch.ones_like(raw_mean)
+                raw_weights = torch.zeros_like(raw_mean)
             else:
                 raw_mean, raw_std, raw_weights = torch.chunk(output, 3, dim=-1)
+
         else:
-            outputs = [head(z_target) for head in self.heads]  # list of [B, n_target, dim_y * 3] * components
+            outputs = [head(z_target) for head in self.heads]
             raw_mean, raw_std, raw_weights = self._map_raw_output(outputs)
 
         mean = raw_mean
         std = F.softplus(raw_std) + self.std_min
         weights = F.softmax(raw_weights, dim=-1)
 
-        outs = AttrDict()
+        return AttrDict(
+            mixture_means=mean,
+            mixture_stds=std,
+            mixture_weights=weights,
+        )
 
-        # also outputs params
-        outs.mixture_means = mean
-        outs.mixture_stds = std
-        outs.mixture_weights = weights
-
-        return outs
-    
-    def initialize_head(self,
-                        dim_embedding: int,
-                        dim_feedforward: int,
-                        dim_outcome: int,
-                        single_head: bool,
-                        num_components: int,
-                        ) -> nn.Module:
-        """
-        Initializes the model with either a single head or multiple heads based on the `single_head` flag.
-
-        Args:
-            dim_embedding: The input dimension.
-            dim_feedforward: The dimension of the feedforward network.
-            dim_outcome: The output dimension.
-            single_head: Flag to determine whether to initialize a single head or multiple heads.
-            num_components: The number of components if `single_head` is False.
-
-        Returns:
-            model: The initialized model head(s).
-        """
-        if single_head & num_components > 1:
-            output_dim = dim_outcome * 3
-        else:
-            output_dim = dim_outcome * 2
-
+    def initialize_head(
+        self,
+        dim_embedding: int,
+        dim_feedforward: int,
+        single_head: bool,
+        num_components: int,
+    ) -> nn.Module:
         if single_head:
+            if num_components == 1:
+                output_dim = 2
+            else:
+                output_dim = 3 * num_components
+
             model = nn.Sequential(
                 nn.Linear(dim_embedding, dim_feedforward),
                 nn.ReLU(),
                 nn.Linear(dim_feedforward, output_dim),
             )
+
         else:
             model = nn.ModuleList(
                 [
                     nn.Sequential(
                         nn.Linear(dim_embedding, dim_feedforward),
                         nn.ReLU(),
-                        nn.Linear(dim_feedforward, dim_outcome * 3),
+                        nn.Linear(dim_feedforward, 3),
                     )
                     for _ in range(num_components)
                 ]
             )
+
         return model
-
-    @staticmethod
-    def compute_ll(value: torch.Tensor, means: torch.Tensor, stds: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        """
-        Computes log-likelihood loss for a Gaussian mixture model.
-
-        Args:
-            value: Value tensor [B, T]
-            means: Means tensor [B, T, components]
-            stds: Standard deviations tensor [B, T, components]
-            weights: Weights tensor [B, T, components]
-
-        Returns:
-            log_likelihood: Log-likelihood tensor [B, T]
-        """
-        components = Normal(means, stds, validate_args=False)
-        log_probs = components.log_prob(value)
-        weighted_log_probs = log_probs + torch.log(weights)
-        return torch.logsumexp(weighted_log_probs, dim=-1)
 
     @staticmethod
     def _map_raw_output(outputs: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Maps the raw output of the target head to the mean, standard deviation, and weights.
-
-        Args:
-            outputs: List of tensors [B, T, dim_y * 3] * components
+        outputs: list of C tensors, each [B, n_target, 3]
 
         Returns:
-            raw_mean: Means tensor [B, T, components]
-            raw_std: Standard deviations tensor [B, T, components]
-            raw_weights: Weights tensor [B, T, components]
+            raw_mean:    [B, n_target, C]
+            raw_std:     [B, n_target, C]
+            raw_weights: [B, n_target, C]
         """
-        concatenated = torch.stack(outputs).movedim(0, -1).flatten(-2, -1) # [B, T, dim_y * 3 * components]
-        raw_mean, raw_std, raw_weights = torch.chunk(concatenated, 3, dim=-1) # 3 x [B, T, components]
-        return raw_mean, raw_std, raw_weights
+        stacked = torch.stack(outputs, dim=-2)  # [B, n_target, C, 3]
 
+        raw_mean = stacked[..., 0]      # [B, n_target, C]
+        raw_std = stacked[..., 1]       # [B, n_target, C]
+        raw_weights = stacked[..., 2]   # [B, n_target, C]
+
+        return raw_mean, raw_std, raw_weights
 
 
 class OutputHead(nn.Module):
@@ -283,11 +251,14 @@ class OutputHead(nn.Module):
         std_min: float = 1e-4,
         value_head: bool = False,
         time_token: bool = False,
+        dim_target: Optional[int] = None,
         **kwargs: Any
     ) -> None:
+        
         super().__init__()
         self.dim_x = dim_x
         self.dim_y = dim_y
+        self.dim_target = dim_y if dim_target is None else dim_target
 
         self.time_token = time_token
         
@@ -300,7 +271,8 @@ class OutputHead(nn.Module):
         
         # Target head for posterior prediction
         self.target_head = GMMTargetHead(
-            dim_y=dim_y,
+            #dim_y=dim_y,
+            dim_y=self.dim_target, 
             dim_embedding=dim_embedding,
             dim_feedforward=dim_feedforward,
             num_components=num_components,
@@ -392,6 +364,7 @@ class OutputHead(nn.Module):
             )
         return outs
     
+
 
 class ContinuousOutputHead(nn.Module):
     """

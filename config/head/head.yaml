@@ -2,6 +2,7 @@ _target_: model.head.OutputHead
 
 dim_x: ${task.dim_x}
 dim_y: ${task.dim_y}
+dim_target: ${task.n_target_theta}
 
 dim_embedding: ${encoder.dim_embedding}
 dim_feedforward: ${encoder.dim_feedforward}
