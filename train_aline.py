@@ -219,7 +219,13 @@ def main(cfg):
                 f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}, "
                 f"torch.version.cuda={torch.version.cuda}"
             )
+
+        # If cfg.device == "cuda", make it explicit.
+        if requested_device == "cuda":
+            requested_device = "cuda:0"
+
         device = torch.device(requested_device)
+        torch.cuda.set_device(device.index)
     else:
         device = torch.device("cpu")
 
