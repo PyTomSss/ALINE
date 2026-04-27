@@ -169,8 +169,26 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
                     wandb.log({"PCE": pce_loss, "NMC": nmc_loss}, step=epoch)
 
         next_epoch = epoch + 1
+
         if cfg.checkpoint and next_epoch % cfg.checkpoint == 0:
             save_checkpoint(cfg, model, optimizer, scheduler, next_epoch, with_epoch=True)
+
+        # Save model/checkpoint every N epochs after burning
+        save_every = getattr(cfg, "save_every_after_burning", None)
+        if save_every is not None and save_every > 0:
+            if next_epoch >= cfg.burning_epoch and (next_epoch - cfg.burning_epoch) % save_every == 0:
+                ckpt_dir = os.path.join(cfg.output_dir, "checkpoints_after_burning")
+                os.makedirs(ckpt_dir, exist_ok=True)
+
+                weight_path = save_state_dict(
+                    model,
+                    ckpt_dir,
+                    f"{cfg.file_name.split('.')[0]}_epoch_{next_epoch}.pth",
+                )
+
+                save_checkpoint(cfg, model, optimizer, scheduler, next_epoch, with_epoch=True)
+
+                logger.info(f"Saved periodic model weights at {weight_path}")
 
     total_time = sum(training_times)
     average_time = np.mean(training_times[cfg.burning_epoch:])

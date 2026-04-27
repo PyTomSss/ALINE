@@ -49,6 +49,9 @@ eval_batch_size_final: 5
 n_query_final: 2000
 T_final: 40
 
+save_every_after_burning: 10000
+save_eval_every_after_burning: false
+
 run_id: 1
 
 # Output
