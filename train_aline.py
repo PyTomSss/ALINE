@@ -205,7 +205,7 @@ def main(cfg):
     if not torch.cuda.is_available():
         cfg.device = "cpu"
     torch.set_default_device(cfg.device)
-    if cfg.device == "cuda:0":
+    if cfg.device == "cuda":
         torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
     # Setting random seed
@@ -265,7 +265,11 @@ def main(cfg):
     encoder = hydra.utils.instantiate(cfg.encoder)
     head = hydra.utils.instantiate(cfg.head)
     model = Aline(embedder, encoder, head)
+    device = torch.device(cfg.device)
+    model = model.to(device)
+    
     logger.info(model)
+    logger.info(f"Model device: {next(model.parameters()).device}")
 
     if cfg.wandb.use_wandb:
         wandb.watch(model, log_freq=10)
