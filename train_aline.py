@@ -159,7 +159,7 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         if cfg.wandb.use_wandb:
             wandb.log({"loss": loss, "likelihood": -predict_loss, "design_loss": design_loss, "targeted_likelihood": -torch.mean(torch.stack(nlls_for_query))}, step=epoch)
 
-        if epoch % verbose == 0:
+        if epoch + 1 % verbose == 0:
             logger.info(f"Epoch: {epoch}, loss: {losses[-1]:.4f}, T: {T}, likelihood: {-predict_loss}, design_loss: {design_loss}, predict_loss: {predict_loss}")
 
             if cfg.eval.EIG:
