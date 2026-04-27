@@ -32,7 +32,8 @@ beta: 1
 fix_seed: True
 clip_grads: True
 design_type: random
-verbose: 500
+verbose: 50000000
+#verbose: 500
 device: cuda
 checkpoint: 0   # 0 if no checkpoint
 load_checkpoint: False

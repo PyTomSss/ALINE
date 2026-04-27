@@ -235,6 +235,7 @@ class GMMTargetHead(nn.Module):
         return raw_mean, raw_std, raw_weights
 
 
+
 class OutputHead(nn.Module):
     """
     Combined head that processes batches and routes to acquisition and target heads.
