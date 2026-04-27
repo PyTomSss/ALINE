@@ -205,7 +205,7 @@ def main(cfg):
     if not torch.cuda.is_available():
         cfg.device = "cpu"
     torch.set_default_device(cfg.device)
-    if cfg.device == "cuda":
+    if cfg.device == "cuda:0":
         torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
     # Setting random seed
