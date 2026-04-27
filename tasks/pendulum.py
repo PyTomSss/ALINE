@@ -1,7 +1,7 @@
 import torch
 from attrdictionary import AttrDict
 
-from simulators import SimplePendulum, PriorPendulum, DoublePendulum
+from tasks.simulators import SimplePendulum, PriorPendulum, DoublePendulum
 
 
 class HiddenPendulum:
