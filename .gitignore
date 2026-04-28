@@ -42,3 +42,4 @@ results/
 figures/
 data/
 *.slurm
+*checkpoints/

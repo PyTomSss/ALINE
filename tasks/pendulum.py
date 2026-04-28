@@ -1,10 +1,10 @@
 import torch
 from attrdictionary import AttrDict
-
+from tasks.base_task import Task
 from tasks.simulators import SimplePendulum, PriorPendulum, DoublePendulum
 
 
-class HiddenPendulum:
+class HiddenPendulum(Task):
     def __init__(
         self,
         dim_x=1,
@@ -21,6 +21,7 @@ class HiddenPendulum:
         training=True,
         **kwargs,
     ):
+        super(HiddenPendulum, self).__init__(dim_x=dim_x, dim_y=dim_y, n_target_theta=n_target_theta)
         self.training = training
         self.dim_x = dim_x
         self.dim_y = dim_y
@@ -91,6 +92,8 @@ class HiddenPendulum:
         batch.target_all = theta
         batch.theta = theta
         batch.current_y = current_y
+        batch.target_theta = theta
+        batch.n_target_theta = self.n_target_theta
 
         return batch
 
