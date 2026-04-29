@@ -20,7 +20,7 @@ batch_size: 512
 # -------------------------
 # Pretrained ALINE policy
 # -------------------------
-pretrained_aline_path: ./checkpoints_after_burning/model/aae_Location_d2_1_epoch_70000.pth
+pretrained_aline_path: ./checkpoints_after_burning/model/aae_Location_d2_1_epoch_60000.pth
 freeze_aline: True
 
 # The old ALINE training loss is disabled.
