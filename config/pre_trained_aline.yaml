@@ -90,7 +90,7 @@ file_name: downstream_${task.name}_T${T}_${run_id}.pt
 
 wandb:
   group: ${task.name}
-  project: "aline-downstream"
+  project: "downstream_trainings"
   use_wandb: False
   run_name: downstream-${task.name}-${task.dim_x}D-T${T}-${now:%Y-%m-%d_%H-%M}
 
