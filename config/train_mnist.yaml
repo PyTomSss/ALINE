@@ -17,7 +17,7 @@ time_token: False
 
 # Optimizer
 optimizer: AdamW
-lr: 1e-3
+lr: 1e-4
 
 # Scheduler
 scheduler: CosineAnnealing
