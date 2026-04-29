@@ -153,6 +153,28 @@ def two_source_mse_loss(theta_pred, theta_true):
 
     return loss.mean()
 
+def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
+    """
+    Permutation-invariant log-MSE-style loss for two 2D sources.
+
+    Per-coordinate loss:
+        err**2 + log(err**2 + eps)
+
+    theta_pred: [B, 2, 2]
+    theta_true: [B, 2, 2]
+    """
+
+    err_id = theta_pred - theta_true
+    loss_id = (err_id ** 2 + torch.log(err_id ** 2 + eps)).mean(dim=(1, 2))
+
+    theta_true_swapped = theta_true[:, [1, 0], :]
+    err_swap = theta_pred - theta_true_swapped
+    loss_swap = (err_swap ** 2 + torch.log(err_swap ** 2 + eps)).mean(dim=(1, 2))
+
+    loss = torch.minimum(loss_id, loss_swap)
+
+    return loss.mean()
+
 
 def train_downstream_from_pretrained_aline(
     cfg,
@@ -203,13 +225,20 @@ def train_downstream_from_pretrained_aline(
         theta = theta.to(device)
 
         # Expected target shape: [B, 2, 2].
-        # If theta is flattened as [B, 4], reshape it.
-        if theta.ndim == 2:
-            theta = theta.view(batch_size, cfg.task.K, cfg.task.dim_x)
+        theta = theta.view(batch_size, cfg.task.K, cfg.task.dim_x)
 
         theta_pred = downstream_net(xi_history, y_history)
 
-        loss = two_source_mse_loss(theta_pred, theta)
+        if cfg.downstream.loss == "mse":
+            loss = two_source_mse_loss(theta_pred, theta)
+        elif cfg.downstream.loss == "logmse":
+            loss = two_source_logmse_loss(
+                theta_pred,
+                theta,
+                eps=getattr(cfg.downstream, "eps_loss", 1e-6),
+            )
+        else:
+            raise ValueError(f"Unknown downstream loss: {cfg.downstream.loss}")
 
         loss.backward()
 

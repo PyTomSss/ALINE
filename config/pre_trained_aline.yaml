@@ -54,7 +54,7 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: permutation_invariant_mse
+  loss: mse
 
   # Logging / checkpoints
   verbose: 5000000
