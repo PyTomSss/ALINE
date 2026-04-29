@@ -353,14 +353,15 @@ class MaskedMNISTClassification(Task):
             self.test_dataset = test_dataset
 
         if prior is None:
-            prior = MNISTDatasetPrior(
+            self.prior = MNISTDatasetPrior(
                 self.dataset,
                 device=device,
                 dtype=dtype,
                 return_labels=True,
             )
 
-        super().__init__(prior=prior, device=device)
+        #super().__init__(prior=prior, device=device)
+        super().__init__(device=device)
 
         if prior_test is None:
             self.prior_test = MNISTDatasetPrior(
