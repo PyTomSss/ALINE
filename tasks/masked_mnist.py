@@ -297,6 +297,9 @@ class MaskedMNISTClassification(Task):
         device: Optional[Union[str, torch.device]] = "cpu",
         dtype: torch.dtype = torch.float32,
         _seed: Optional[int] = None,
+
+        # Compatibilité avec ALINE
+        dim_y: int = 25, 
     ) -> None:
 
         self.name = name
@@ -316,7 +319,7 @@ class MaskedMNISTClassification(Task):
         self.patch_size = patch_size
         self.noise_scale = noise_scale
         self.dim_theta = dim_theta
-        self.dim_xi = self.dim_xi
+        self.dim_xi = dim_xi
         self.dim_x = dim_x
         self.align_corners = align_corners
         self.padding_mode = padding_mode
