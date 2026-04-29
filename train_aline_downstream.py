@@ -222,7 +222,7 @@ def train_downstream_from_pretrained_aline(
 
         losses.append(loss.item())
 
-        if cfg.wandb.use_wandb:
+        if cfg.wandb.use_wandb and (epoch + 1) % 50 == 0:
             wandb.log(
                 {
                     "downstream/loss": loss.item(),
