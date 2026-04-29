@@ -1,10 +1,8 @@
 _target_: tasks.double_pendulum.HiddenDoublePendulum
-
 name: DoublePendulum
 
 dim_x: 2
 dim_y: 4
-
 embedding_type: theta
 mask_type: ["all"]
 
@@ -20,10 +18,11 @@ n_target_theta: 4
 n_context_init: 1
 n_query_init: 200
 
-dim_theta: 4
 design_scale: 1.0
 outcome_scale: 1.0
 
+dim_theta: 4
 dt: 0.05
+
 device: ${device}
 training: true

@@ -144,20 +144,30 @@ class HiddenDoublePendulum:
         n_query_init=200,
         design_scale=1.0,
         outcome_scale=1.0,
+        predict_logtheta=False,
         dt=0.05,
         device="cpu",
         training=True,
         **kwargs,
     ):
+        self.name = "DoublePendulum"
         self.training = training
+
         self.dim_x = dim_x
         self.dim_y = dim_y
         self.dim_theta = dim_theta
+
+        self.n_target_data = 0
         self.n_target_theta = n_target_theta
+
         self.n_context_init = n_context_init
         self.n_query_init = n_query_init
+
         self.design_scale = design_scale
         self.outcome_scale = outcome_scale
+        self.predict_logtheta = predict_logtheta
+
+        self.dt = dt
         self.device = torch.device(device)
 
         self.simulator = DoublePendulum(
@@ -172,24 +182,41 @@ class HiddenDoublePendulum:
         return (
             f"HiddenDoublePendulum(training={self.training}, "
             f"dim_x={self.dim_x}, dim_y={self.dim_y}, "
-            f"dim_theta={self.dim_theta}, device={self.device})"
+            f"dim_theta={self.dim_theta}, dt={self.dt}, "
+            f"device={self.device})"
         )
+
+    def normalize_y(self, y):
+        if self.outcome_scale is None:
+            return y
+        return y / self.outcome_scale
+
+    def make_target(self, theta):
+        if self.predict_logtheta:
+            return torch.log(theta)
+        return theta
 
     def sample_theta(self, batch_size):
         return self.simulator.prior.sample(batch_size)
 
     def sample_query_x(self, batch_size):
         return (
-            2.0 * self.design_scale
-            * torch.rand(batch_size, self.n_query_init, self.dim_x, device=self.device)
+            2.0
+            * self.design_scale
+            * torch.rand(
+                batch_size,
+                self.n_query_init,
+                self.dim_x,
+                device=self.device,
+            )
             - self.design_scale
         )
 
     def sample_batch(self, batch_size):
-        theta = self.sample_theta(batch_size)
-        query_x = self.sample_query_x(batch_size)
+        theta = self.sample_theta(batch_size)          # [B, 4]
+        query_x = self.sample_query_x(batch_size)      # [B, N, 2]
 
-        current_y = self.simulator.get_initial_observation(batch_size)
+        current_y = self.simulator.get_initial_observation(batch_size)  # [B, 4]
 
         context_x = torch.zeros(
             batch_size,
@@ -198,18 +225,18 @@ class HiddenDoublePendulum:
             device=self.device,
         )
 
-        context_y = current_y[:, None, :].repeat(1, self.n_context_init, 1)
+        context_y_phys = current_y[:, None, :].repeat(1, self.n_context_init, 1)
 
         batch = AttrDict()
         batch.context_x = context_x
-        batch.context_y = context_y
+        batch.context_y = self.normalize_y(context_y_phys)
         batch.query_x = query_x
 
-        # Target predicted by ALINE
-        batch.target_all = theta
         batch.theta = theta
+        batch.target_theta = theta
+        batch.target_all = self.make_target(theta)
 
-        # Stateful dynamics
+        # Physical state used by simulator.
         batch.current_y = current_y
 
         return batch
@@ -235,7 +262,7 @@ class HiddenDoublePendulum:
         )
 
         batch.context_y = torch.cat(
-            [batch.context_y, y_next[:, None, :]],
+            [batch.context_y, self.normalize_y(y_next)[:, None, :]],
             dim=1,
         )
 
@@ -243,5 +270,3 @@ class HiddenDoublePendulum:
         batch.query_x = self.sample_query_x(B)
 
         return batch
-
-

@@ -156,7 +156,7 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         end_time = time.time()
         training_times.append(end_time - start_time)
 
-        if cfg.wandb.use_wandb:
+        if cfg.wandb.use_wandb and (epoch % 50 == 0):
             wandb.log({"loss": loss, "likelihood": -predict_loss, "design_loss": design_loss, "targeted_likelihood": -torch.mean(torch.stack(nlls_for_query))}, step=epoch)
 
         if epoch + 1 % verbose == 0:
