@@ -30,7 +30,7 @@ train_aline: False
 # Downstream theta predictor
 # -------------------------
 downstream:
-  max_epoch: 10000
+  max_epoch: 50000
 
   # Optimizer
   optimizer: AdamW
@@ -54,11 +54,12 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: mse
+  loss: logmse
+  eps_loss: 1e-6
 
   # Logging / checkpoints
   verbose: 5000000
-  checkpoint: 5000
+  checkpoint: 10000
   checkpoint_name: downstream_ckpt.tar
   file_name: downstream_theta_predictor.pt
 
