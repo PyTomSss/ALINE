@@ -136,6 +136,66 @@ def rollout_aline_policy(cfg, aline_model, experiment, batch_size, T, device):
     return xi_history, y_history, theta
 
 
+
+@torch.inference_mode()
+def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, device):
+    """
+    Faster rollout for frozen ALINE policy.
+
+    Returns:
+        xi_history: [B, T, dim_x]
+        y_history:  [B, T, dim_y]
+        theta:      [B, K, dim_theta] or [B, theta_dim]
+    """
+
+    aline_model.eval()
+
+    batch = experiment.sample_batch(batch_size)
+
+    # Ensure tensors are on the right device if sample_batch does not already do it.
+    # Remove this if your experiment already samples directly on GPU.
+    for key, value in list(batch.items()):
+        if torch.is_tensor(value):
+            batch[key] = value.to(device, non_blocking=True)
+
+    B = batch.query_x.shape[0]
+    dim_x = batch.query_x.shape[-1]
+    dim_y = batch.context_y.shape[-1]
+
+    xi_history = torch.empty(B, T, dim_x, device=device)
+    y_history = torch.empty(B, T, dim_y, device=device)
+
+    batch_indices = torch.arange(B, device=device)
+
+    if cfg.time_token:
+        # Avoid allocating a new tensor at each step.
+        time_tokens = torch.arange(T, device=device, dtype=torch.float32) / T
+
+    for t in range(T):
+        if cfg.time_token:
+            batch.t = time_tokens[t:t + 1]
+
+        pred = aline_model(batch)
+        idx = pred.design_out.idx.view(-1).long()  # [B]
+
+        xi_t = batch.query_x[batch_indices, idx]   # [B, dim_x]
+        xi_history[:, t] = xi_t
+
+        batch = experiment.update_batch(batch, idx)
+
+        y_history[:, t] = batch.context_y[:, -1, :]
+
+    if hasattr(batch, "target_all"):
+        theta = batch.target_all
+    elif hasattr(batch, "theta"):
+        theta = batch.theta
+    else:
+        raise AttributeError("Batch has neither `target_all` nor `theta`.")
+
+    return xi_history, y_history, theta
+
+
+
 def two_source_mse_loss(theta_pred, theta_true):
     """
     Permutation-invariant MSE for two 2D sources.
@@ -152,6 +212,7 @@ def two_source_mse_loss(theta_pred, theta_true):
     loss = torch.minimum(loss_id, loss_swap)
 
     return loss.mean()
+
 
 def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
     """
@@ -213,7 +274,8 @@ def train_downstream_from_pretrained_aline(
         downstream_net.train()
         optimizer.zero_grad()
 
-        xi_history, y_history, theta = rollout_aline_policy(
+        #xi_history, y_history, theta = rollout_aline_policy(
+        xi_history, y_history, theta = rollout_aline_policy_fast(
             cfg=cfg,
             aline_model=aline_model,
             experiment=experiment,
