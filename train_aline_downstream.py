@@ -261,7 +261,7 @@ def train_downstream_from_pretrained_aline(
                 step=epoch,
             )
 
-        if (epoch + 1) % cfg.verbose == 0:
+        if (epoch + 1) % cfg.downstream.verbose == 0:
             logger.info(
                 f"[Downstream] Epoch {epoch + 1}/{max_epoch} | "
                 f"loss={loss.item():.6f}"
