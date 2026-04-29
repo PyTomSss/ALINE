@@ -205,7 +205,7 @@ def train_downstream_from_pretrained_aline(
         # Expected target shape: [B, 2, 2].
         # If theta is flattened as [B, 4], reshape it.
         if theta.ndim == 2:
-            theta = theta.view(batch_size, cfg.task.n_sources, cfg.task.source_dim)
+            theta = theta.view(batch_size, cfg.task.K, cfg.task.dim_x)
 
         theta_pred = downstream_net(xi_history, y_history)
 
@@ -372,8 +372,8 @@ def main(cfg):
         dim_x=cfg.task.dim_x,
         dim_y=cfg.task.dim_y,
         T=cfg.T,
-        n_sources=cfg.task.n_sources,
-        source_dim=cfg.task.source_dim,
+        n_sources=cfg.task.K,
+        source_dim=cfg.task.dim_x,
         hidden_dims=tuple(cfg.downstream.hidden_dims),
         activation=cfg.downstream.activation,
         dropout=cfg.downstream.dropout,
