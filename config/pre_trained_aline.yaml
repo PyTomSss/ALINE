@@ -15,7 +15,7 @@ device: cuda
 T: 30
 min_T: 30
 time_token: False
-batch_size: 1024
+batch_size: 512
 
 # -------------------------
 # Pretrained ALINE policy
@@ -30,7 +30,7 @@ train_aline: False
 # Downstream theta predictor
 # -------------------------
 downstream:
-  max_epoch: 100000
+  max_epoch: 10000
 
   # Optimizer
   optimizer: AdamW
@@ -58,7 +58,7 @@ downstream:
 
   # Logging / checkpoints
   verbose: 5000000
-  checkpoint: 50000
+  checkpoint: 5000
   checkpoint_name: downstream_ckpt.tar
   file_name: downstream_theta_predictor.pt
 

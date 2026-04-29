@@ -136,7 +136,6 @@ def rollout_aline_policy(cfg, aline_model, experiment, batch_size, T, device):
     return xi_history, y_history, theta
 
 
-
 @torch.inference_mode()
 def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, device):
     """
