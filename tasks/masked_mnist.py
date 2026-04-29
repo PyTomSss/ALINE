@@ -331,8 +331,9 @@ class MaskedMNISTClassification(Task):
 
         self.dtype = dtype
         self.dim_y = in_channels * patch_size * patch_size
+        self.device = torch.device(device)
 
-        super().__init__(device=device)
+        super().__init__(dim_x=dim_x, dim_y=dim_y, n_target_theta=n_target_theta)
 
         if dataset is None:
             self.dataset = torchvision.datasets.MNIST(
@@ -1157,6 +1158,7 @@ class MaskedMNISTClassification(Task):
             return y
 
         return y, mean_patches, used_designs
+
 
     def reparam_make_outcomes(
         self,
