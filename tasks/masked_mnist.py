@@ -332,6 +332,8 @@ class MaskedMNISTClassification(Task):
         self.dtype = dtype
         self.dim_y = in_channels * patch_size * patch_size
 
+        super().__init__(device=device)
+
         if dataset is None:
             self.dataset = torchvision.datasets.MNIST(
                 root=data_root,
@@ -361,7 +363,6 @@ class MaskedMNISTClassification(Task):
             )
 
         #super().__init__(prior=prior, device=device)
-        super().__init__(device=device)
 
         if prior_test is None:
             self.prior_test = MNISTDatasetPrior(
