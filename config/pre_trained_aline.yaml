@@ -54,7 +54,7 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: mse
+  loss: logmse
   eps_loss: 1e-6
 
   # Logging / checkpoints
