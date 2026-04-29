@@ -1,4 +1,4 @@
-_target_: tasks.double_pendulum.HiddenDoublePendulum
+_target_: tasks.pendulum.HiddenDoublePendulum
 name: DoublePendulum
 
 dim_x: 2
