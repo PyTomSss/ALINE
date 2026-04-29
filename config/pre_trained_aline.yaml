@@ -68,7 +68,7 @@ downstream:
 # -------------------------
 eval:
   downstream_eval: True
-  batch_size: 500
+  batch_size: 2000
   T_final: 30
 
   # These are for BOED/EIG eval of ALINE itself.

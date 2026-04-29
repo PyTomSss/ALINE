@@ -209,7 +209,7 @@ def two_source_mse_loss(theta_pred, theta_true):
     return loss.mean()
 
 
-def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
+def two_source_logmse_loss_old(theta_pred, theta_true, eps=1e-6):
     """
     Permutation-invariant log-MSE-style loss for two 2D sources.
 
@@ -228,6 +228,49 @@ def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
     loss_swap = (err_swap ** 2 + torch.log(err_swap ** 2 + eps)).mean(dim=(1, 2))
 
     loss = torch.minimum(loss_id, loss_swap)
+
+    return loss.mean()
+
+
+def canonicalize_sources_by_norm(theta):
+    """
+    Canonicalize source order by increasing Euclidean norm.
+
+    theta: [B, K, D]
+
+    Returns:
+        theta_sorted: [B, K, D]
+    """
+
+    norms = torch.linalg.norm(theta, dim=-1)          # [B, K]
+    order = torch.argsort(norms, dim=1)               # [B, K]
+
+    gather_idx = order.unsqueeze(-1).expand_as(theta) # [B, K, D]
+    theta_sorted = torch.gather(theta, dim=1, index=gather_idx)
+
+    return theta_sorted
+
+
+def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
+    """
+    Canonicalized log-MSE-style loss for two 2D sources.
+
+    Sources are ordered by increasing Euclidean norm before computing the loss.
+
+    Per-coordinate loss:
+        err**2 + log(err**2 + eps)
+
+    theta_pred: [B, 2, 2]
+    theta_true: [B, 2, 2]
+    """
+
+    theta_pred = canonicalize_sources_by_norm(theta_pred)
+    theta_true = canonicalize_sources_by_norm(theta_true)
+
+    err = theta_pred - theta_true
+
+    loss = err ** 2 + torch.log(err ** 2 + eps)
+    loss = loss.mean(dim=(1, 2))
 
     return loss.mean()
 
