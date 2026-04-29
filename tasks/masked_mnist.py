@@ -275,7 +275,7 @@ class MaskedMNISTClassification(Task):
         patch_size: int = 5,
         noise_scale: float = 0.05,
         dim_theta: int = 28 * 28,
-        dim_xi: int = 2,
+        dim_x: int = 2,
         align_corners: bool = True,
         padding_mode: str = "zeros",
         allow_padding: bool = True,
@@ -315,7 +315,7 @@ class MaskedMNISTClassification(Task):
         self.patch_size = patch_size
         self.noise_scale = noise_scale
         self.dim_theta = dim_theta
-        self.dim_xi = dim_xi
+        self.dim_xi = dim_x
         self.align_corners = align_corners
         self.padding_mode = padding_mode
         self.allow_padding = allow_padding
