@@ -152,12 +152,6 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
 
     batch = experiment.sample_batch(batch_size)
 
-    # Ensure tensors are on the right device if sample_batch does not already do it.
-    # Remove this if your experiment already samples directly on GPU.
-    for key, value in list(batch.items()):
-        if torch.is_tensor(value):
-            batch[key] = value.to(device, non_blocking=True)
-
     B = batch.query_x.shape[0]
     dim_x = batch.query_x.shape[-1]
     dim_y = batch.context_y.shape[-1]
@@ -168,7 +162,6 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
     batch_indices = torch.arange(B, device=device)
 
     if cfg.time_token:
-        # Avoid allocating a new tensor at each step.
         time_tokens = torch.arange(T, device=device, dtype=torch.float32) / T
 
     for t in range(T):
@@ -176,24 +169,27 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
             batch.t = time_tokens[t:t + 1]
 
         pred = aline_model(batch)
-        idx = pred.design_out.idx.view(-1).long()  # [B]
 
-        xi_t = batch.query_x[batch_indices, idx]   # [B, dim_x]
-        xi_history[:, t] = xi_t
+        # update_batch expects idx with shape [B, 1]
+        idx_update = pred.design_out.idx.long()
 
-        batch = experiment.update_batch(batch, idx)
+        if idx_update.ndim == 1:
+            idx_update = idx_update.unsqueeze(1)
+        elif idx_update.ndim > 2:
+            idx_update = idx_update.view(idx_update.shape[0], -1)
+
+        # for direct advanced indexing, use [B]
+        idx_flat = idx_update.squeeze(1)
+
+        xi_history[:, t] = batch.query_x[batch_indices, idx_flat]
+
+        batch = experiment.update_batch(batch, idx_update)
 
         y_history[:, t] = batch.context_y[:, -1, :]
 
-    if hasattr(batch, "target_all"):
-        theta = batch.target_all
-    elif hasattr(batch, "theta"):
-        theta = batch.theta
-    else:
-        raise AttributeError("Batch has neither `target_all` nor `theta`.")
+    theta = batch.target_all if hasattr(batch, "target_all") else batch.theta
 
     return xi_history, y_history, theta
-
 
 
 def two_source_mse_loss(theta_pred, theta_true):
