@@ -19,6 +19,8 @@ from model import Aline
 from utils import create_logger, set_seed, save_state_dict, compute_ll, load_checkpoint, save_checkpoint, create_target_mask, select_targets_by_mask, set_layerwise_lr, eval_boed
 
 
+os.environ["HYDRA_FULL_ERROR"] = "1"
+
 class HistoryMLPThetaPredictor(nn.Module):
     """
     MLP downstream that predicts theta from flattened design/observation history.
@@ -83,8 +85,7 @@ class HistoryMLPThetaPredictor(nn.Module):
             -1, self.n_sources, self.source_dim
         )                                               # [B, 2, 2]
 
-        return theta_pred
-    
+        return theta_pred    
 
 
 @torch.no_grad()
