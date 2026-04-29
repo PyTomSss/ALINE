@@ -1,0 +1,99 @@
+defaults:
+  - _self_
+  - encoder: encoder
+  - embedder: embedder
+  - head: head
+  - task: location_finding
+
+seed: 123
+fix_seed: True
+device: cuda
+
+# -------------------------
+# Rollout settings
+# -------------------------
+T: 30
+min_T: 30
+time_token: False
+batch_size: 200
+
+# -------------------------
+# Pretrained ALINE policy
+# -------------------------
+pretrained_aline_path: /checkpoints_after_burning/model/aae_Location_d2_1_epoch_100000.pth
+freeze_aline: True
+
+# The old ALINE training loss is disabled.
+train_aline: False
+
+# -------------------------
+# Downstream theta predictor
+# -------------------------
+downstream:
+  max_epoch: 100000
+
+  # Optimizer
+  optimizer: AdamW
+  lr: 5e-4
+  weight_decay: 0.0
+
+  # Scheduler
+  scheduler: ExponentialLR
+  gamma: 0.95
+  annealing_freq: 2000
+
+  # Architecture
+  hidden_dims: [512, 256, 128]
+  activation: SiLU
+  dropout: 0.0
+
+  # Target shape: two sources in dimension 2
+  n_sources: 2
+  source_dim: 2
+  theta_dim: 4
+
+  # Training
+  clip_grads: True
+  loss: permutation_invariant_mse
+
+  # Logging / checkpoints
+  verbose: 5000000
+  checkpoint: 50000
+  checkpoint_name: downstream_ckpt.tar
+  file_name: downstream_theta_predictor.pt
+
+# -------------------------
+# Evaluation
+# -------------------------
+eval:
+  downstream_eval: True
+  batch_size: 500
+  T_final: 30
+
+  # These are for BOED/EIG eval of ALINE itself.
+  # Not needed for supervised downstream training unless you still want them.
+  EIG: False
+  L: 50000
+  M: 2000
+  L_final: 1000000
+  M_final: 2000
+  batch_size_final: 200
+  n_query_final: 2000
+
+run_id: 1
+
+# -------------------------
+# Output
+# -------------------------
+output_dir: ./checkpoints/downstream_aline/
+file_name: downstream_${task.name}_T${T}_${run_id}.pt
+
+wandb:
+  group: ${task.name}
+  project: "aline-downstream"
+  use_wandb: False
+  run_name: downstream-${task.name}-${task.dim_x}D-T${T}-${now:%Y-%m-%d_%H-%M}
+
+hydra:
+  run:
+    dir: outputs/hydra/downstream/${now:%Y-%m-%d}/${now:%H-%M-%S}

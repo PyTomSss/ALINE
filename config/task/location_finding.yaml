@@ -16,12 +16,12 @@ mask_index: null  # no need for theta mode
 attend_to: null  # for split mode, we want to only attend to data or theta
 
 n_target_data: 0
-n_target_theta: 2  # (x, y)
+n_target_theta: 4  # (x, y)
 
 n_context_init: 1  # or 0
 n_query_init: 200
 
-K: 1
+K: 2
 
 theta_dist: uniform
 design_scale: 1

@@ -62,7 +62,8 @@ save_eval_every_after_burning: false
 run_id: 1
 
 # Output
-output_dir: ./outputs
+#output_dir: ./outputs
+output_dir: ./checkpoints/61629_1/
 file_name: aae_${task.name}_d${task.dim_x}_${run_id}.pth
 
 
