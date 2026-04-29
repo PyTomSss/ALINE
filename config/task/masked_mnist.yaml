@@ -1,34 +1,47 @@
-task:
-  _target_: tasks.masked_mnist.MaskedMNISTClassification
-  name: MaskedMNIST
+_target_: tasks.masked_mnist.MaskedMNISTClassification
 
-  patch_size: 5
-  noise_scale: 0.05
+name: MaskedMNIST
 
-  dim_theta: 784
-  dim_xi: 2
-  in_channels: 1
-  num_classes: 10
+# ALINE interface
+embedding_type: theta
+mask_type: ["all"]
 
-  allow_padding: true
-  padding_mode: zeros
-  reparameterize_design: false
-  design_input_range: pixel
+n_target_data: 0
+n_target_theta: 10
+n_selected_targets: null
+predefined_masks: null
+predefined_mask_weights: null
+mask_index: null
+attend_to: null
 
-  embedding_type: theta
-  mask_type: ["all"]
-  n_target_data: 0
-  n_target_theta: 10
-  n_selected_targets: null
-  predefined_masks: null
-  predefined_mask_weights: null
-  mask_index: null
-  attend_to: null
+# Active querying
+n_context_init: 1
+n_query_init: 128
 
-  n_context_init: 1
-  n_query_init: 128
+# MNIST patch task
+patch_size: 5
+noise_scale: 0.05
 
-  data_root: ./data
-  download: false
-  device: ${device}
-  _seed: ${seed}
+dim_theta: 784
+dim_xi: 2
+dim_x: 2
+dim_y: 25
+
+num_classes: 10
+in_channels: 1
+
+allow_padding: true
+padding_mode: zeros
+align_corners: true
+
+# query_x is already in pixel coordinates
+reparameterize_design: false
+design_input_range: pixel
+
+# Dataset
+data_root: /vols/bitbucket/kebl8577/datasets/data
+download: false
+
+# Runtime
+device: ${device}
+_seed: ${seed}

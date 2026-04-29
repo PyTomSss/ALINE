@@ -1,47 +1,73 @@
-_target_: tasks.masked_mnist.MaskedMNISTClassification
+defaults:
+  - _self_
+  - encoder: encoder
+  - embedder: embedder
+  - head: head
+  - task: masked_mnist
 
-name: MaskedMNIST
+seed: 123
 
-# ALINE task interface
-embedding_type: theta
-mask_type: ["all"]
+max_epoch: 50000
+burning_epoch: 10000
+batch_size: 200
 
-n_target_data: 0
-n_target_theta: 10
-n_selected_targets: null
-predefined_masks: null
-predefined_mask_weights: null
-mask_index: null
-attend_to: null
+T: 5
+min_T: 5
+time_token: False
 
-# Active querying
-n_context_init: 1
-n_query_init: 128
+# Optimizer
+optimizer: AdamW
+lr: 1e-3
 
-# MNIST patch task
-patch_size: 5
-noise_scale: 0.05
+# Scheduler
+scheduler: CosineAnnealing
+scheduler_args: {T_0: 1000, T_mult: 2}
 
-dim_theta: 784
-dim_xi: 2
-dim_x: 2
-dim_y: 25
+# Loss
+gamma: 1
+alpha: 1
+beta: 1
 
-num_classes: 10
-in_channels: 1
+# Training
+fix_seed: True
+clip_grads: True
+design_type: random
+verbose: 50000000
+# verbose: 500
+device: cuda
+checkpoint: 0   # 0 if no checkpoint
+load_checkpoint: False
+load_path: null
+checkpoint_name: ckpt.tar
 
-allow_padding: true
-padding_mode: zeros
-align_corners: true
+# Evaluation
+eval:
+  EIG: false
+  L: 50000
+  M: 2000
+  batch_size: 500
+  L_final: 1000000
+  M_final: 2000
+  batch_size_final: 200
+  n_query_final: 2000
+  T_final: 30
 
-# Important: query_x is already in pixel coordinates
-reparameterize_design: false
-design_input_range: pixel
+save_every_after_burning: 10000
+save_eval_every_after_burning: false
 
-# Dataset
-data_root: /vols/bitbucket/kebl8577/datasets/data
-download: false
+run_id: 1
 
-# Runtime
-device: ${device}
-_seed: ${seed}
+# Output
+output_dir: ./checkpoints/masked_mnist/
+file_name: aae_${task.name}_p${task.patch_size}_q${task.n_query_init}_T${T}_${run_id}.pth
+
+##### W&B config #####
+wandb:
+  group: ${task.name}
+  project: "aline"
+  use_wandb: False
+  run_name: ${task.name}-p${task.patch_size}-q${task.n_query_init}-T${T}-${now:%Y-%m-%d_%H-%M}
+
+hydra:
+  run:
+    dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
