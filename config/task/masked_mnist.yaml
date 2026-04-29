@@ -1,0 +1,34 @@
+task:
+  _target_: tasks.masked_mnist.MaskedMNISTClassification
+  name: MaskedMNIST
+
+  patch_size: 5
+  noise_scale: 0.05
+
+  dim_theta: 784
+  dim_xi: 2
+  in_channels: 1
+  num_classes: 10
+
+  allow_padding: true
+  padding_mode: zeros
+  reparameterize_design: false
+  design_input_range: pixel
+
+  embedding_type: theta
+  mask_type: ["all"]
+  n_target_data: 0
+  n_target_theta: 10
+  n_selected_targets: null
+  predefined_masks: null
+  predefined_mask_weights: null
+  mask_index: null
+  attend_to: null
+
+  n_context_init: 1
+  n_query_init: 128
+
+  data_root: ./data
+  download: false
+  device: ${device}
+  _seed: ${seed}
