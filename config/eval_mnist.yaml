@@ -1,0 +1,82 @@
+defaults:
+  - _self_
+  - encoder: encoder
+  - embedder: embedder
+  - head: head
+  - task: masked_mnist
+
+# --------------------
+# Reproducibility
+# --------------------
+seed: 123
+fix_seed: true
+
+# --------------------
+# Device
+# --------------------
+device: cpu
+
+# --------------------
+# Model / task setup
+# --------------------
+T: 5
+min_T: 5
+time_token: false
+design_type: random
+
+# Ces champs sont gardés parce que build_model_and_task(cfg, device)
+# peut potentiellement les attendre, même en évaluation.
+batch_size: 200
+optimizer: AdamW
+lr: 1e-4
+scheduler: CosineAnnealing
+scheduler_args:
+  T_0: 1000
+  T_mult: 2
+
+gamma: 1
+alpha: 1
+beta: 1
+
+# --------------------
+# Evaluation only
+# --------------------
+eval_checkpoint: checkpoints/61844_1/model/aae_MaskedMNIST_p5_q128_T5_1.pth
+
+T_eval: 5
+eval_batch_size_classif: 256
+eval_num_batches_classif: 50
+deterministic_observations: false
+
+# Optional: useful if your code expects cfg.eval to exist
+eval:
+  EIG: false
+  L: 50000
+  M: 2000
+  batch_size: 500
+  L_final: 1000000
+  M_final: 2000
+  batch_size_final: 200
+  n_query_final: 2000
+  T_final: 30
+
+# --------------------
+# Output / logging
+# --------------------
+output_dir: ./eval_outputs/masked_mnist/
+file_name: eval_mnist_results.txt
+
+wandb:
+  group: ${task.name}
+  project: aline
+  use_wandb: false
+  run_name: eval-${task.name}-p${task.patch_size}-q${task.n_query_init}-T${T_eval}-${now:%Y-%m-%d_%H-%M}
+
+# --------------------
+# Hydra
+# --------------------
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/hydra_eval/${now:%Y-%m-%d}/${now:%H-%M-%S}

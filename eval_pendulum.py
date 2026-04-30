@@ -346,16 +346,10 @@ def evaluate_eig(
 # ---------------------------------------------------------------------
 
 def main():
-    run_dir = "checkpoints/61643_1/"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_10000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_15000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_20000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_25000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_30000.pth"
-    weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_35000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_40000.pth"
-    #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_45000.pth"
+    #run_dir = "checkpoints/61643_1/"
+    run_dir = "checkpoints/76183_1/"
     #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_50000.pth"
+    weight_path = "checkpoints/76183_1/model/aae_Pendulum_d1_1.pth"
 
 
     cfg = load_hydra_cfg(run_dir)

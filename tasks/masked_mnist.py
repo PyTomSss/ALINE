@@ -335,6 +335,10 @@ class MaskedMNISTClassification(Task):
 
         super().__init__(dim_x=dim_x, dim_y=dim_y, n_target_theta=n_target_theta)
 
+
+        ##### Just for Eval: 
+        download=False
+
         if dataset is None:
             self.dataset = torchvision.datasets.MNIST(
                 root=data_root,
