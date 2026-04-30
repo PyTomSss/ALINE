@@ -562,9 +562,6 @@ class HiddenPendulum(Task):
 
 
 
-
-
-
 class HiddenDoublePendulum:
     def __init__(
         self,

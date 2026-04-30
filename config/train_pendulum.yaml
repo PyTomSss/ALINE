@@ -1,0 +1,102 @@
+defaults:
+  - _self_
+  - encoder: encoder
+  - embedder: embedder
+  - head: head
+  - task: pendulum
+
+seed: 123
+
+# --------------------
+# Training budget
+# --------------------
+max_epoch: 70000
+burning_epoch: 20000
+batch_size: 200
+
+T: 30
+min_T: 30
+time_token: False
+
+# --------------------
+# Optimizer
+# --------------------
+optimizer: AdamW
+lr: 1e-3
+
+# --------------------
+# Scheduler
+# --------------------
+scheduler: CosineAnnealing
+scheduler_args:
+  T_0: 1000
+  T_mult: 2
+
+# --------------------
+# Loss
+# --------------------
+gamma: 1
+alpha: 1
+beta: 1
+
+# --------------------
+# Training
+# --------------------
+fix_seed: True
+clip_grads: True
+design_type: random
+
+# Very high value disables frequent eval/logging
+verbose: 50000000
+# verbose: 500
+
+device: cuda
+
+checkpoint: 0
+load_checkpoint: False
+load_path: null
+checkpoint_name: ckpt.tar
+
+# --------------------
+# Evaluation during/final training
+# --------------------
+eval:
+  EIG: false
+  L: 50000
+  M: 2000
+  batch_size: 500
+
+  L_final: 1000000
+  M_final: 2000
+  batch_size_final: 200
+  n_query_final: 2000
+  T_final: 30
+
+save_every_after_burning: 10000
+save_eval_every_after_burning: false
+
+run_id: 1
+
+# --------------------
+# Output
+# --------------------
+output_dir: ./checkpoints/pendulum_transition/
+file_name: aae_${task.name}_dx${task.dim_x}_dxi${task.dim_xi}_T${T}_${run_id}.pth
+
+# --------------------
+# W&B config
+# --------------------
+wandb:
+  group: ${task.name}
+  project: "aline"
+  use_wandb: False
+  run_name: ${task.name}-dx${task.dim_x}-dxi${task.dim_xi}-T${T}-${now:%Y-%m-%d_%H-%M}
+
+# --------------------
+# Hydra
+# --------------------
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
