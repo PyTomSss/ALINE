@@ -466,10 +466,14 @@ class OutputHead(nn.Module):
         # Posterior prediction
         posterior_out = self.target_head(batch, z_target)
 
+        # Posterior prediction
+        posterior_out = self.target_head(batch, z_target)
+
         # ACE uncertainty-sampling baseline.
-        # For classification, this returns logits over classes from query embeddings.
-        # This is only meaningful if downstream code knows how to interpret it.
-        posterior_out_query = self.target_head(batch, z_query)
+        if self.target_head_type == "classification":
+            posterior_out_query = None
+        else:
+            posterior_out_query = self.target_head(batch, z_query)
 
         design_out = AttrDict(
             idx=idx_next,       # [B, 1]
