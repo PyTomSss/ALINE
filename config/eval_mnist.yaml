@@ -41,12 +41,13 @@ beta: 1
 # --------------------
 # Evaluation only
 # --------------------
-eval_checkpoint: checkpoints/61844_1/model/aae_MaskedMNIST_p5_q128_T5_1.pth
+eval_checkpoint: checkpoints/76727_1/checkpoints_after_burning/model/aae_MaskedMNIST_p5_q128_T5_1_epoch_50000.pth
 
 T_eval: 5
 eval_batch_size_classif: 256
 eval_num_batches_classif: 50
 deterministic_observations: false
+visualize_designs: True
 
 # Optional: useful if your code expects cfg.eval to exist
 eval:

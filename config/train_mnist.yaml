@@ -2,18 +2,25 @@ defaults:
   - _self_
   - encoder: encoder
   - embedder: embedder
-  - head: head
+  - head: classification_head
   - task: masked_mnist
 
 seed: 123
 
-max_epoch: 200000
-burning_epoch: 25000
+max_epoch: 60000
+burning_epoch: 10000
 batch_size: 200
 
 T: 5
 min_T: 5
 time_token: False
+
+# ------------------------------------------------------------
+# Task type
+# ------------------------------------------------------------
+# This training file assumes a categorical posterior over MNIST classes:
+# posterior_out.logits with shape [B, task.n_target_theta].
+target_type: classification
 
 # Optimizer
 optimizer: AdamW
@@ -21,7 +28,9 @@ lr: 1e-4
 
 # Scheduler
 scheduler: CosineAnnealing
-scheduler_args: {T_0: 1000, T_mult: 2}
+scheduler_args:
+  T_0: 1000
+  T_mult: 2
 
 # Loss
 gamma: 1
@@ -32,15 +41,22 @@ beta: 1
 fix_seed: True
 clip_grads: True
 design_type: random
-verbose: 50000000
-# verbose: 500
+
+# Logging
+# The previous value was effectively disabling logs.
+# Use a reasonable value for debugging, then increase if needed.
+verbose: 500
+# verbose: 50000000
+
 device: cuda
+
 checkpoint: 0   # 0 if no checkpoint
 load_checkpoint: False
 load_path: null
 checkpoint_name: ckpt.tar
 
 # Evaluation
+# Keep EIG disabled until eval_boed is adapted to classification logits.
 eval:
   EIG: false
   L: 50000
@@ -52,21 +68,21 @@ eval:
   n_query_final: 2000
   T_final: 30
 
-save_every_after_burning: 25000
+save_every_after_burning: 15000
 save_eval_every_after_burning: false
 
 run_id: 1
 
 # Output
 output_dir: ./checkpoints/masked_mnist/
-file_name: aae_${task.name}_p${task.patch_size}_q${task.n_query_init}_T${T}_${run_id}.pth
+file_name: aline_classif_${task.name}_p${task.patch_size}_q${task.n_query_init}_T${T}_${run_id}.pth
 
 ##### W&B config #####
 wandb:
   group: ${task.name}
   project: "aline"
   use_wandb: False
-  run_name: ${task.name}-p${task.patch_size}-q${task.n_query_init}-T${T}-${now:%Y-%m-%d_%H-%M}
+  run_name: ${task.name}-classification-p${task.patch_size}-q${task.n_query_init}-T${T}-${now:%Y-%m-%d_%H-%M}
 
 hydra:
   run:

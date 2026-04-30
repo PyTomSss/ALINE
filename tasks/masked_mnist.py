@@ -238,8 +238,9 @@ class MaskedMNISTClassification(Task):
 
     Generative interpretation
     -------------------------
-    theta  : MNIST image [B, C, H, W]
-    xi     : top-left corner of a patch, [B, 2], with coordinates (row, col)
+    image  : MNIST image [B, C, H, W]
+    label  : digit class [B]
+    xi     : top-left corner of a patch, [B, 2], coordinates (row, col)
     y      : noisy observed patch, flattened, [B, C * patch_size * patch_size]
 
     ALINE interpretation
@@ -249,10 +250,10 @@ class MaskedMNISTClassification(Task):
     context_y  : observed noisy patches [B, t, C * p * p]
     target_all : one-hot digit label [B, num_classes]
 
-    Padding is allowed by default:
-        row, col in [-(p - 1), H - 1]
-    so a patch may lie partially outside the image. Outside-image values are
-    handled by grid_sample padding_mode, usually "zeros".
+    Important
+    ---------
+    The posterior target is the class label, not the image.
+    The image is only the hidden object used to generate patch observations.
     """
 
     def __init__(
@@ -274,9 +275,18 @@ class MaskedMNISTClassification(Task):
         # Task parameters
         patch_size: int = 5,
         noise_scale: float = 0.05,
-        dim_theta: int = 28 * 28,
+
+        # Classification target dimension.
+        # For MNIST classification, this should be num_classes.
+        dim_theta: Optional[int] = None,
+
+        # Image dimension kept separately to avoid confusing it with class theta.
+        dim_image: int = 28 * 28,
+
         dim_x: int = 2,
-        dim_xi : int = 2, 
+        dim_xi: int = 2,
+        dim_y: Optional[int] = None,
+
         align_corners: bool = True,
         padding_mode: str = "zeros",
         allow_padding: bool = True,
@@ -297,47 +307,81 @@ class MaskedMNISTClassification(Task):
         device: Optional[Union[str, torch.device]] = "cpu",
         dtype: torch.dtype = torch.float32,
         _seed: Optional[int] = None,
-
-        # Compatibilité avec ALINE
-        dim_y: int = 25, 
     ) -> None:
 
         self.name = name
         self.embedding_type = embedding_type
         self.mask_type = ["all"] if mask_type is None else mask_type
+
         self.n_target_data = n_target_data
-        self.n_target_theta = n_target_theta
+        self.num_classes = int(num_classes)
+        self.n_target_theta = int(n_target_theta)
+
+        if self.n_target_theta != self.num_classes:
+            raise ValueError(
+                f"For MNIST classification, n_target_theta should equal num_classes. "
+                f"Got n_target_theta={self.n_target_theta}, num_classes={self.num_classes}."
+            )
+
         self.n_selected_targets = n_selected_targets
         self.predefined_masks = predefined_masks
         self.predefined_mask_weights = predefined_mask_weights
         self.mask_index = mask_index
         self.attend_to = attend_to
 
-        self.n_context_init = n_context_init
-        self.n_query_init = n_query_init
+        self.n_context_init = int(n_context_init)
+        self.n_query_init = int(n_query_init)
 
-        self.patch_size = patch_size
-        self.noise_scale = noise_scale
-        self.dim_theta = dim_theta
-        self.dim_xi = dim_xi
-        self.dim_x = dim_x
+        self.patch_size = int(patch_size)
+        self.noise_scale = float(noise_scale)
+
+        # Classification target dimension.
+        # This is the dimension of the one-hot class target, not the image.
+        self.dim_theta = self.num_classes if dim_theta is None else int(dim_theta)
+
+        if self.dim_theta != self.num_classes:
+            raise ValueError(
+                f"For classification, dim_theta should equal num_classes. "
+                f"Got dim_theta={self.dim_theta}, num_classes={self.num_classes}. "
+                f"If you meant the image size, use dim_image instead."
+            )
+
+        self.dim_image = int(dim_image)
+
+        self.dim_xi = int(dim_xi)
+        self.dim_x = int(dim_x)
+
+        if self.dim_x != 2 or self.dim_xi != 2:
+            raise ValueError(
+                f"MaskedMNISTClassification expects 2D patch designs. "
+                f"Got dim_x={self.dim_x}, dim_xi={self.dim_xi}."
+            )
+
+        self.in_channels = int(in_channels)
+        self.dim_y = self.in_channels * self.patch_size * self.patch_size
+
+        if dim_y is not None and int(dim_y) != self.dim_y:
+            raise ValueError(
+                f"dim_y is inconsistent with in_channels * patch_size^2. "
+                f"Got dim_y={dim_y}, but expected {self.dim_y}."
+            )
+
         self.align_corners = align_corners
         self.padding_mode = padding_mode
         self.allow_padding = allow_padding
         self.reparameterize_design = reparameterize_design
-        self.num_classes = num_classes
-        self.in_channels = in_channels
         self.design_input_range = design_input_range
 
         self.dtype = dtype
-        self.dim_y = in_channels * patch_size * patch_size
         self.device = torch.device(device)
 
-        super().__init__(dim_x=dim_x, dim_y=dim_y, n_target_theta=n_target_theta)
-
-
-        ##### Just for Eval: 
-        download=False
+        # Important: ALINE sees a design dimension dim_x and an observation dimension dim_y.
+        # The classification target dimension is n_target_theta=num_classes.
+        super().__init__(
+            dim_x=self.dim_x,
+            dim_y=self.dim_y,
+            n_target_theta=self.n_target_theta,
+        )
 
         if dataset is None:
             self.dataset = torchvision.datasets.MNIST(
@@ -362,18 +406,18 @@ class MaskedMNISTClassification(Task):
         if prior is None:
             self.prior = MNISTDatasetPrior(
                 self.dataset,
-                device=device,
-                dtype=dtype,
+                device=self.device,
+                dtype=self.dtype,
                 return_labels=True,
             )
-
-        #super().__init__(prior=prior, device=device)
+        else:
+            self.prior = prior
 
         if prior_test is None:
             self.prior_test = MNISTDatasetPrior(
                 self.test_dataset,
-                device=device,
-                dtype=dtype,
+                device=self.device,
+                dtype=self.dtype,
                 return_labels=True,
             )
         else:
@@ -390,14 +434,16 @@ class MaskedMNISTClassification(Task):
             indexing="ij",
         )
 
-        # If Task inherits from nn.Module, this is the cleanest version.
         self.register_buffer("local_y", gy, persistent=False)
         self.register_buffer("local_x", gx, persistent=False)
+
 
     def __repr__(self) -> str:
         return (
             f"MaskedMNISTClassification("
             f"patch_size={self.patch_size}, "
+            f"dim_y={self.dim_y}, "
+            f"num_classes={self.num_classes}, "
             f"noise_scale={self.noise_scale}, "
             f"allow_padding={self.allow_padding}, "
             f"n_query_init={self.n_query_init})"
@@ -409,10 +455,19 @@ class MaskedMNISTClassification(Task):
 
     def sample_batch(self, batch_size: int):
         """
-        Sample an ALINE-compatible batch.
+        Sample an ALINE-compatible MNIST classification batch.
 
         Returns
         -------
+        batch.image:
+            [B, C, H, W], hidden image used to generate patches.
+
+        batch.label / batch.labels:
+            [B], integer class labels.
+
+        batch.target_all:
+            [B, num_classes], one-hot class labels.
+
         batch.context_x:
             [B, n_context_init, 2]
 
@@ -421,24 +476,37 @@ class MaskedMNISTClassification(Task):
 
         batch.query_x:
             [B, n_query_init, 2]
-
-        batch.target_all:
-            [B, num_classes]
         """
-        theta, labels = self.prior.sample(batch_size)
 
-        theta = theta.to(device=self.device, dtype=self.dtype)
-        labels = labels.to(device=self.device)
+        images, labels = self.prior.sample(batch_size)
 
-        if theta.ndim == 3:
-            theta = theta.unsqueeze(1)
+        images = images.to(device=self.device, dtype=self.dtype)
+        labels = labels.to(device=self.device).long()
 
-        B, C, H, W = theta.shape
+        if images.ndim == 3:
+            images = images.unsqueeze(1)
+
+        if images.ndim != 4:
+            raise ValueError(
+                f"Expected MNIST images with shape [B, C, H, W], got {images.shape}."
+            )
+
+        B, C, H, W = images.shape
+
+        if C != self.in_channels:
+            raise ValueError(
+                f"Expected in_channels={self.in_channels}, got image channels C={C}."
+            )
 
         all_corners = self._make_all_patch_corners(H, W)  # [N, 2]
         n_all = all_corners.shape[0]
 
-        observed_mask = torch.zeros(B, n_all, device=self.device, dtype=torch.bool)
+        observed_mask = torch.zeros(
+            B,
+            n_all,
+            device=self.device,
+            dtype=torch.bool,
+        )
 
         # Initial context: reveal n_context_init random patches.
         if self.n_context_init > 0:
@@ -459,7 +527,7 @@ class MaskedMNISTClassification(Task):
             )
 
             init_y, _, used_designs = self.reparam_make_outcomes(
-                theta=theta,
+                theta=images,
                 designs=init_designs,
                 eps=eps,
                 reparameterize_design=False,
@@ -472,8 +540,20 @@ class MaskedMNISTClassification(Task):
             observed_mask[arange, init_indices] = True
 
         else:
-            context_x = torch.empty(B, 0, self.dim_xi, device=self.device, dtype=self.dtype)
-            context_y = torch.empty(B, 0, self.dim_y, device=self.device, dtype=self.dtype)
+            context_x = torch.empty(
+                B,
+                0,
+                self.dim_xi,
+                device=self.device,
+                dtype=self.dtype,
+            )
+            context_y = torch.empty(
+                B,
+                0,
+                self.dim_y,
+                device=self.device,
+                dtype=self.dtype,
+            )
 
         query_indices = self._sample_candidate_indices(
             observed_mask=observed_mask,
@@ -485,9 +565,18 @@ class MaskedMNISTClassification(Task):
         target_all = self._one_hot_labels(labels)  # [B, num_classes]
 
         batch = AttrDict(
-            theta=theta,
+            # Hidden image used by the simulator / patch generator.
+            image=images,
+            theta_image=images,
+
+            # Classification target.
+            label=labels,
             labels=labels,
             target_all=target_all,
+
+            # Optional compatibility field:
+            # theta now denotes the classification target, not the image.
+            theta=target_all,
 
             context_x=context_x,
             context_y=context_y,
@@ -499,36 +588,28 @@ class MaskedMNISTClassification(Task):
         )
 
         return batch
+    
 
     def update_batch(self, batch, idx: Tensor):
         """
         Update batch after ALINE selects one candidate patch.
 
-        Parameters
-        ----------
-        batch:
-            ALINE batch.
-
         idx:
             Index into batch.query_x. Shape [B], [B, 1], or compatible.
-
-        Returns
-        -------
-        batch:
-            Updated batch with selected patch appended to context.
         """
+
         if idx.ndim == 2:
             idx = idx.squeeze(-1)
 
         idx = idx.long().to(self.device)
 
-        B = batch.theta.shape[0]
+        B = batch.image.shape[0]
         arange = torch.arange(B, device=self.device)
 
         selected_designs = batch.query_x[arange, idx]  # [B, 2]
 
         y = self._sample_outcome(
-            theta=batch.theta,
+            theta=batch.image,
             design=selected_designs,
             reparameterize_design=False,
         )  # [B, dim_y]
@@ -555,6 +636,7 @@ class MaskedMNISTClassification(Task):
         batch.query_x = batch.all_corners[query_indices]
 
         return batch
+    
 
     # =====================================================================================
     # Candidate patch corners
@@ -652,8 +734,23 @@ class MaskedMNISTClassification(Task):
 
         return torch.stack(out, dim=0)
 
+
     def _one_hot_labels(self, labels: Tensor) -> Tensor:
-        return F.one_hot(labels.long(), num_classes=self.num_classes).to(
+        labels = labels.to(device=self.device).long()
+
+        if labels.ndim > 1:
+            labels = labels.squeeze(-1)
+
+        if labels.min() < 0 or labels.max() >= self.num_classes:
+            raise ValueError(
+                f"Labels should be in [0, {self.num_classes - 1}], "
+                f"got min={labels.min().item()}, max={labels.max().item()}."
+            )
+
+        return F.one_hot(
+            labels,
+            num_classes=self.num_classes,
+        ).to(
             device=self.device,
             dtype=self.dtype,
         )
@@ -1088,14 +1185,10 @@ class MaskedMNISTClassification(Task):
         returns:
             eps: [B, T, C*p*p]
         """
-        p = self.patch_size
-        C = self._get_num_channels()
-        dim_y = C * p * p
-
         return torch.randn(
             B,
             T,
-            dim_y,
+            self.dim_y,
             device=self.device,
             dtype=self.dtype,
             generator=self.generator,
@@ -1223,3 +1316,5 @@ class MaskedMNISTClassification(Task):
             y = mean_patches
 
         return y, mean_patches, used_designs
+    
+

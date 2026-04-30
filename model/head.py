@@ -6,6 +6,90 @@ from typing import Any, List, Tuple, Optional
 from attrdictionary import AttrDict
 
 
+
+class ClassificationTargetHead(nn.Module):
+    """
+    Target head for classification.
+
+    Input:
+        z_target: [B, n_target, dim_embedding]
+
+    Output:
+        logits: [B, num_classes]
+
+    Recommended setup:
+        n_target == num_classes.
+        Each target token corresponds to one class.
+    """
+
+    def __init__(
+        self,
+        dim_y: int,
+        dim_embedding: int,
+        dim_feedforward: int,
+        num_classes: int | None = None,
+        dropout: float = 0.0,
+        use_tokenwise_logits: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+
+        self.dim_y = dim_y
+        self.dim_embedding = dim_embedding
+        self.dim_feedforward = dim_feedforward
+        self.num_classes = num_classes if num_classes is not None else dim_y
+        self.dropout = dropout
+        self.use_tokenwise_logits = use_tokenwise_logits
+
+        if use_tokenwise_logits:
+            # One scalar logit per target token.
+            # Expects z_target.shape[1] == num_classes at forward time.
+            self.classifier = nn.Sequential(
+                nn.Linear(dim_embedding, dim_feedforward),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim_feedforward, 1),
+            )
+        else:
+            # Pool target tokens, then output all class logits.
+            self.classifier = nn.Sequential(
+                nn.Linear(dim_embedding, dim_feedforward),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim_feedforward, self.num_classes),
+            )
+
+    def forward(self, batch: AttrDict, z_target: torch.Tensor) -> AttrDict:
+        """
+        z_target: [B, n_target, dim_embedding]
+        """
+
+        if z_target.ndim != 3:
+            raise ValueError(
+                f"Expected z_target with shape [B, n_target, dim_embedding], "
+                f"got {tuple(z_target.shape)}."
+            )
+
+        if self.use_tokenwise_logits:
+            logits = self.classifier(z_target).squeeze(-1)  # [B, n_target]
+
+            if logits.shape[-1] != self.num_classes:
+                raise ValueError(
+                    f"ClassificationTargetHead with use_tokenwise_logits=True "
+                    f"expects n_target == num_classes. "
+                    f"Got n_target={logits.shape[-1]} and "
+                    f"num_classes={self.num_classes}."
+                )
+
+        else:
+            # Aggregate target-token embeddings into one representation.
+            pooled = z_target.mean(dim=1)  # [B, dim_embedding]
+            logits = self.classifier(pooled)  # [B, num_classes]
+
+        return AttrDict(logits=logits)
+
+
+
 class AcquisitionHead(nn.Module):
     """
     Acquisition head that predicts the acquisition scores for the query data
