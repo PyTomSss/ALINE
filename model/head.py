@@ -323,8 +323,16 @@ class GMMTargetHead(nn.Module):
 class OutputHead(nn.Module):
     """
     Combined head that processes batches and routes to acquisition and target heads.
-    Similar to DPTNP's forward method, it splits input into query and posterior parts.
+
+    It supports two posterior types:
+
+    - target_head_type="gmm":
+        posterior_out contains mixture_means, mixture_stds, mixture_weights.
+
+    - target_head_type="classification":
+        posterior_out contains logits [B, num_classes].
     """
+
     def __init__(
         self,
         dim_x: int,
@@ -337,118 +345,154 @@ class OutputHead(nn.Module):
         value_head: bool = False,
         time_token: bool = False,
         dim_target: Optional[int] = None,
-        **kwargs: Any
+
+        # New arguments
+        target_head_type: str = "gmm",
+        num_classes: Optional[int] = None,
+        classification_mode: str = "pooled_mean",
+        classification_dropout: float = 0.0,
+
+        **kwargs: Any,
     ) -> None:
-        
         super().__init__()
+
         self.dim_x = dim_x
         self.dim_y = dim_y
         self.dim_target = dim_y if dim_target is None else dim_target
 
         self.time_token = time_token
-        
+        self.target_head_type = target_head_type
+
         # Acquisition head for design selection
         self.acquisition_head = AcquisitionHead(
             dim_embedding=dim_embedding,
             dim_feedforward=dim_feedforward,
             time_token=time_token,
         )
-        
-        # Target head for posterior prediction
-        self.target_head = GMMTargetHead(
-            #dim_y=dim_y,
-            dim_y=self.dim_target, 
-            dim_embedding=dim_embedding,
-            dim_feedforward=dim_feedforward,
-            num_components=num_components,
-            single_head=single_head,
-            std_min=std_min
-        )
 
-        # Value head for value prediction
-        self.value_head = value_head
+        # Posterior / target head
+        if target_head_type == "gmm":
+            self.target_head = GMMTargetHead(
+                dim_y=self.dim_target,
+                dim_embedding=dim_embedding,
+                dim_feedforward=dim_feedforward,
+                num_components=num_components,
+                single_head=single_head,
+                std_min=std_min,
+            )
+
+        elif target_head_type == "classification":
+            self.target_head = ClassificationTargetHead(
+                dim_y=self.dim_target,
+                dim_embedding=dim_embedding,
+                dim_feedforward=dim_feedforward,
+                num_classes=num_classes if num_classes is not None else self.dim_target,
+                mode=classification_mode,
+                dropout=classification_dropout,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown target_head_type={target_head_type}. "
+                "Expected 'gmm' or 'classification'."
+            )
+
+        # Optional value head
+        self.use_value_head = value_head
         if value_head:
             self.value_head = ValueHead(
                 dim_embedding=dim_embedding,
-                dim_feedforward=dim_feedforward
+                dim_feedforward=dim_feedforward,
             )
-    
+        else:
+            self.value_head = None
+
     def forward(self, batch: AttrDict, z: torch.Tensor) -> AttrDict:
         """
-        Process batch by splitting into context, query and target parts
-        
+        Process batch by splitting into context, query and target parts.
+
         Args:
-            batch: Batch containing context and target tasks
-            z: Embedding tensor [B, N, dim_embedding] where N = n_context + n_query + n_target
-                Context embeddings are on the left, query in the middle, target on the right
-            
+            batch:
+                Batch containing context/query/target tokens.
+
+            z:
+                Embedding tensor [B, N, dim_embedding], where
+                N = n_context + n_query + n_target.
+
         Returns:
-            outs: AttrDict containing acquisition and posterior prediction results
+            outs:
+                AttrDict containing:
+                    design_out
+                    posterior_out
+                    posterior_out_query
+                    optionally value
         """
+
         batch_size = z.shape[0]
-        
-        # Get dimensions from batch
+
         n_context = batch.context_x.shape[1]
         n_query = batch.query_x.shape[1]
-        
-        # Extract query and target embeddings
-        z_query = z[:, n_context:n_context+n_query]
-        z_target = z[:, n_context+n_query:]  # embeddings of target data + target theta
-        
-        # Use acquisition head for query selection (design point)
+
+        z_query = z[:, n_context : n_context + n_query]
+        z_target = z[:, n_context + n_query :]
+
+        # Acquisition head over query candidates
         if self.time_token:
-            time_info = batch.t.unsqueeze(1).unsqueeze(1).expand(batch_size, n_query, 1)  # [B, n_query, 1]
-            z_query_with_time = torch.cat([z_query, time_info], dim=-1)
-            zt = self.acquisition_head(z_query_with_time)  # [B, n_query]
+            time_info = batch.t.unsqueeze(1).unsqueeze(1).expand(
+                batch_size,
+                n_query,
+                1,
+            )  # [B, n_query, 1]
+            z_query_for_acq = torch.cat([z_query, time_info], dim=-1)
+            zt = self.acquisition_head(z_query_for_acq)  # [B, n_query]
         else:
             zt = self.acquisition_head(z_query)  # [B, n_query]
-        
-        # Select design with the highest probability during inference, sample during training
+
+        # Safety: acquisition probabilities should be positive and normalized.
+        # If AcquisitionHead already returns probabilities, this is okay.
+        # If it returns logits, replace Categorical(zt) by Categorical(logits=zt).
         if self.training:
-            # Choose design with probabilities zt
-            m_design = Categorical(zt)
+            m_design = Categorical(probs=zt)
             idx_next = m_design.sample()  # [B]
             log_prob = m_design.log_prob(idx_next)
         else:
-            # Choose design with the largest probability
-            log_prob, idx_next = torch.max(zt, -1)
-            log_prob = torch.log(log_prob)
-            
-        
-        # Get the selected design point
-        idx_next = idx_next.unsqueeze(1) # [B, 1]
-        
-        # Use target head for posterior prediction
+            probs = zt
+            idx_next = torch.argmax(probs, dim=-1)  # [B]
+            chosen_prob = probs.gather(1, idx_next.unsqueeze(1)).squeeze(1)
+            log_prob = torch.log(chosen_prob.clamp_min(1e-12))
+
+        idx_next = idx_next.unsqueeze(1)  # [B, 1]
+
+        # Posterior prediction
         posterior_out = self.target_head(batch, z_target)
-        posterior_out_query = self.target_head(batch, z_query)  # For ACE uncertainty sampling baseline
-        
-        # Combine results
-        # Value prediction
-        if self.value_head:
+
+        # ACE uncertainty-sampling baseline.
+        # For classification, this returns logits over classes from query embeddings.
+        # This is only meaningful if downstream code knows how to interpret it.
+        posterior_out_query = self.target_head(batch, z_query)
+
+        design_out = AttrDict(
+            idx=idx_next,       # [B, 1]
+            log_prob=log_prob,  # [B]
+            zt=zt,              # [B, n_query]
+        )
+
+        if self.use_value_head:
             z_context = z[:, :n_context]
             value = self.value_head(z_context)
-            outs = AttrDict(
+
+            return AttrDict(
                 posterior_out_query=posterior_out_query,
                 posterior_out=posterior_out,
-                design_out=AttrDict(
-                    idx=idx_next,       # [B, 1]
-                    log_prob=log_prob,  # [B]
-                    zt=zt               # [B, N_query]
-                ),
-                value=value             # [B]
+                design_out=design_out,
+                value=value,
             )
-        else:
-            outs = AttrDict(
-                posterior_out_query=posterior_out_query,
-                posterior_out=posterior_out,
-                design_out=AttrDict(
-                    idx=idx_next,       # [B, 1]
-                    log_prob=log_prob,  # [B]
-                    zt=zt               # [B, N_query]
-                ),
-            )
-        return outs
-    
+
+        return AttrDict(
+            posterior_out_query=posterior_out_query,
+            posterior_out=posterior_out,
+            design_out=design_out,
+        )    
 
 
 class ContinuousOutputHead(nn.Module):

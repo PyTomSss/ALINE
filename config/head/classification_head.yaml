@@ -1,0 +1,24 @@
+_target_: model.head.OutputHead
+
+dim_x: ${task.dim_x}
+dim_y: ${task.dim_y}
+
+# Number of classification targets/classes.
+dim_target: ${task.n_target_theta}
+num_classes: ${task.n_target_theta}
+
+dim_embedding: ${encoder.dim_embedding}
+dim_feedforward: ${encoder.dim_feedforward}
+
+# Use categorical posterior for MNIST.
+target_head_type: classification
+classification_mode: pooled_mean
+classification_dropout: 0.0
+
+# Kept for backward compatibility with GMM tasks, unused when classification.
+num_components: 10
+single_head: False
+std_min: 1e-4
+
+value_head: False
+time_token: ${time_token}
