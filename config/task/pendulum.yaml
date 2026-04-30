@@ -2,8 +2,10 @@ _target_: tasks.pendulum.HiddenPendulum
 
 name: Pendulum
 
-dim_x: 1
+#dim_x: 1
+dim_x: 4
 dim_y: 2
+dim_xi: 1
 
 embedding_type: theta
 mask_type: ["all"]
@@ -29,3 +31,9 @@ theta_family: normal
 
 device: ${device}
 training: true
+
+include_time: true
+normalize_time: true
+max_T: ${T}
+use_delta_y: true
+
