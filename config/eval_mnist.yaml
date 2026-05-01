@@ -47,7 +47,7 @@ eval_checkpoint: checkpoints/61895_1/checkpoints_after_burning/model/aline_class
 
 T_eval: 5
 eval_batch_size_classif: 256
-eval_num_batches_classif: 100
+eval_num_batches_classif: 200
 deterministic_observations: false
 visualize_designs: True
 

@@ -43,8 +43,8 @@ reparameterize_design: false
 design_input_range: pixel
 
 #data_root: /bitbucket/kebl8577/datasets/data
-#data_root: /vols/bitbucket/kebl8577/datasets/data
-data_root: data
+data_root: /vols/bitbucket/kebl8577/datasets/data
+#data_root: data
 download: false
 
 device: ${device}
