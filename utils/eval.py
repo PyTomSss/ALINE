@@ -258,9 +258,6 @@ def compute_rmse(target_values, mixture_means, mixture_stds, mixture_weights):
 
 # -------------------------- Simple Pendulum ---------------------# 
 
-import torch
-import numpy as np
-
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------

@@ -30,13 +30,11 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         max_epoch (int): max epoch of optimisation
         verbose (int): interval to show the process.
     """
-    # Optimizer
     optimizer, scheduler = set_layerwise_lr(cfg, model)
 
     logger.info(f"Optimizer: {optimizer}")
     logger.info(f"Scheduler: {scheduler}")
 
-    # Load from checkpoint if specified
     if cfg.load_checkpoint is True:
         start_epoch, optimizer, scheduler = load_checkpoint(cfg, model, optimizer, scheduler, cfg.load_path)
     else:
@@ -45,7 +43,6 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
     logger.info(f"Optimizer: {optimizer}")
     logger.info(f"Scheduler: {scheduler}")
 
-    # Set smaller query size during burining
     if start_epoch < cfg.burning_epoch:
         experiment.n_query_init = cfg.T
 
@@ -57,7 +54,6 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         model.train()
         optimizer.zero_grad()
 
-        # Data
         T = random.randint(min_T, max_T)
         batch = experiment.sample_batch(batch_size)
 
@@ -78,7 +74,6 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         nlls_for_prediction = []
         nlls_for_query = []
 
-        # T-steps experiment
         for t in range(T):
             if cfg.time_token:
                 batch.t = torch.tensor([t/T])
@@ -135,19 +130,15 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
 
         losses.append(loss.item())
 
-        # Gradient clipping
         if cfg.clip_grads:
             clip_grad_norm_(model.parameters(), max_norm=1.0, norm_type="inf")
 
 
-        # Setting different learning rates for shared layers after the burning stage
         if epoch == cfg.burning_epoch:
             optimizer, scheduler = set_layerwise_lr(cfg, model, epoch)
 
-            # reset query size
             experiment.n_query_init = cfg.task.n_query_init
 
-            # save the model
             logger.info(f"""Model has been saved at {save_state_dict(model, cfg.output_dir, f'{cfg.file_name.split(".")[0]}_burning.pth')}""")
 
         optimizer.step()
@@ -175,7 +166,6 @@ def train(cfg, logger, model, experiment, batch_size: int, min_T: int, max_T: in
         if cfg.checkpoint and next_epoch % cfg.checkpoint == 0:
             save_checkpoint(cfg, model, optimizer, scheduler, next_epoch, with_epoch=True)
 
-        # Save model/checkpoint every N epochs after burning
         save_every = getattr(cfg, "save_every_after_burning", None)
         if save_every is not None and save_every > 0:
             if next_epoch >= cfg.burning_epoch and (next_epoch - cfg.burning_epoch) % save_every == 0:
@@ -220,7 +210,6 @@ def main(cfg):
                 f"torch.version.cuda={torch.version.cuda}"
             )
 
-        # If cfg.device == "cuda", make it explicit.
         if requested_device == "cuda":
             requested_device = "cuda:0"
 
@@ -236,7 +225,6 @@ def main(cfg):
         torch.cuda.set_device(device)
         print("Using GPU:", torch.cuda.get_device_name(device))
 
-    # Setting random seed
     if cfg.fix_seed:
         set_seed(cfg.seed)
     else:
@@ -244,11 +232,9 @@ def main(cfg):
 
     cfg.output_dir = str(HydraConfig.get().runtime.output_dir)
 
-    # Ensure min_T is not larger than T
     if cfg.min_T > cfg.T:
         cfg.min_T = cfg.T
     
-    # Create logger
     logger = create_logger(os.path.join(cfg.output_dir, 'logs'), name=cfg.task.name)
     logger.info("Running with config:\n{}".format(OmegaConf.to_yaml(cfg)))
 
@@ -260,14 +246,13 @@ def main(cfg):
             config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
             dir=cfg.output_dir,
         )
-        # Save hydra configs with wandb (handles hydra's multirun dir)
+
         try:
             hydra_log_dir = os.path.join(HydraConfig.get().runtime.output_dir, ".hydra")
             wandb.save(str(hydra_log_dir), policy="now")
         except FileExistsError:
             pass
 
-    # Data
     experiment = hydra.utils.instantiate(cfg.task)
     logger.info(f"Task: {experiment}")
 
@@ -277,7 +262,6 @@ def main(cfg):
         logger.info(f"Input dimension: {experiment.dim_x}")
         logger.info(f"Number of datasets: {experiment.hpob.n_dataset}")
 
-        # Update config with actual dimensions from the dataset
         if cfg.task.dim_x != experiment.dim_x:
             logger.info(
                 f"Updating dim_x from config value {cfg.task.dim_x} to actual dataset dimension {experiment.dim_x}")
@@ -288,7 +272,7 @@ def main(cfg):
                 f"Updating dim_y from config value {cfg.task.dim_y} to actual dataset dimension {experiment.dim_y}")
             cfg.task.dim_y = experiment.dim_y
 
-    # Model
+
     embedder = hydra.utils.instantiate(cfg.embedder)
     encoder = hydra.utils.instantiate(cfg.encoder)
     head = hydra.utils.instantiate(cfg.head)
@@ -302,13 +286,11 @@ def main(cfg):
     if cfg.wandb.use_wandb:
         wandb.watch(model, log_freq=10)
 
-    # Train
+   
     train(cfg, logger, model, experiment, cfg.batch_size, cfg.min_T, cfg.T, cfg.max_epoch, verbose=cfg.verbose)
 
-    # Save
     logger.info(f"Model has been saved at {save_state_dict(model, cfg.output_dir, cfg.file_name)}")
 
-    # Eval
     if cfg.eval.EIG:
         # Set a larger query size
         experiment.n_query_init = cfg.eval.n_query_final
@@ -318,9 +300,8 @@ def main(cfg):
         logger.info(bounds)
         logger.info(f"PCE: {bounds['pce_mean'][cfg.T-1]:.3f}+-{bounds['pce_err'][cfg.T-1]:.3f}\tNMC: {bounds['nmc_mean'][cfg.T-1]:.3f}+-{bounds['nmc_err'][cfg.T-1]:.3f}")
 
-        # save bounds to file
         save_path = os.path.join(cfg.output_dir, "eval", f"{cfg.file_name.split('.')[0]}_N{cfg.eval.n_query_final}_T{cfg.eval.T_final}.tar")
-        # make dir if not exists
+        
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         torch.save(bounds, save_path)
         logger.info(f"Bounds have been saved at {save_path}.")

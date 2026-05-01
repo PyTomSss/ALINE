@@ -109,6 +109,9 @@ class Distribution(ABC):
     def log_prob(self, theta: Any) -> torch.Tensor: ...
 
 
+
+# ---------------- Single Pendulum Task for our repo -------------- #
+
 class PriorPendulum(Distribution, nn.Module):
     """
     Prior for pendulum parameters.
@@ -116,9 +119,6 @@ class PriorPendulum(Distribution, nn.Module):
     family="normal" or "lognormal":
         
     """
-
-    #arg_constraints = {}
-    #support = torch_dist.constraints.real  # (lognormal is actually positive; kept generic)
 
     def __init__(
         self,
@@ -502,6 +502,14 @@ class SimplePendulum(Task):
             y_next[:, 0] = (y_next[:, 0] + math.pi) % (2 * math.pi) - math.pi  # wrap angle to [-pi, pi]
         return y_next
 
+
+
+
+
+
+
+
+# ---------------- Double Pendulum Task for our repo -------------- #
 
 class DoublePendulum(Task):
 

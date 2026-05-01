@@ -113,7 +113,6 @@ def rollout_aline_policy(cfg, aline_model, experiment, batch_size, T, device):
         pred = aline_model.forward(batch)
         design_out = pred.design_out
 
-        # Store selected design before updating batch.
         idx = design_out.idx.squeeze(-1)  # [B]
 
         batch_indices = torch.arange(batch_size, device=device)
@@ -121,8 +120,6 @@ def rollout_aline_policy(cfg, aline_model, experiment, batch_size, T, device):
 
         batch = experiment.update_batch(batch, design_out.idx)
 
-        # In your HiddenLocationFinding-style task, update_batch should append
-        # the newly observed y to context_y. The last context_y is y_t.
         y_t = batch.context_y[:, -1, :]  # [B, dim_y]
 
         xi_hist.append(xi_t)
@@ -169,7 +166,6 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
 
         pred = aline_model(batch)
 
-        # update_batch expects idx with shape [B, 1]
         idx_update = pred.design_out.idx.long()
 
         if idx_update.ndim == 1:
@@ -177,7 +173,6 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
         elif idx_update.ndim > 2:
             idx_update = idx_update.view(idx_update.shape[0], -1)
 
-        # for direct advanced indexing, use [B]
         idx_flat = idx_update.squeeze(1)
 
         xi_history[:, t] = batch.query_x[batch_indices, idx_flat]
@@ -324,7 +319,7 @@ def train_downstream_from_pretrained_aline(
 
         theta = theta.to(device)
 
-        # Expected target shape: [B, 2, 2].
+        # Expected target shape: [B, 2, 2]
         theta = theta.view(batch_size, cfg.task.K, cfg.task.dim_x)
 
         theta_pred = downstream_net(xi_history, y_history)
@@ -389,7 +384,6 @@ def main(cfg):
                 f"torch.version.cuda={torch.version.cuda}"
             )
 
-        # If cfg.device == "cuda", make it explicit.
         if requested_device == "cuda":
             requested_device = "cuda:0"
 
@@ -405,7 +399,6 @@ def main(cfg):
         torch.cuda.set_device(device)
         print("Using GPU:", torch.cuda.get_device_name(device))
 
-    # Setting random seed
     if cfg.fix_seed:
         set_seed(cfg.seed)
     else:
@@ -413,11 +406,9 @@ def main(cfg):
 
     cfg.output_dir = str(HydraConfig.get().runtime.output_dir)
 
-    # Ensure min_T is not larger than T
     if cfg.min_T > cfg.T:
         cfg.min_T = cfg.T
     
-    # Create logger
     logger = create_logger(os.path.join(cfg.output_dir, 'logs'), name=cfg.task.name)
     logger.info("Running with config:\n{}".format(OmegaConf.to_yaml(cfg)))
 
@@ -431,18 +422,16 @@ def main(cfg):
             config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
             dir=cfg.output_dir,
         )
-        # Save hydra configs with wandb (handles hydra's multirun dir)
+        
         try:
             hydra_log_dir = os.path.join(HydraConfig.get().runtime.output_dir, ".hydra")
             wandb.save(str(hydra_log_dir), policy="now")
         except FileExistsError:
             pass
 
-    # Data
     experiment = hydra.utils.instantiate(cfg.task)
     logger.info(f"Task: {experiment}")
 
-    # For HPO tasks, validate that we have an HPO task and update config dimensions
     if hasattr(experiment, 'meta_dataset'):
         logger.info(f"Using HPO-B meta-dataset: {experiment.meta_dataset}")
         logger.info(f"Input dimension: {experiment.dim_x}")
@@ -469,7 +458,6 @@ def main(cfg):
     device = torch.device(cfg.device)
     model = model.to(device)
 
-    # Load pretrained ALINE weights
     if getattr(cfg, "pretrained_aline_path", None) is not None:
         logger.info(f"Loading pretrained ALINE from {cfg.pretrained_aline_path}")
 
@@ -537,13 +525,12 @@ def main(cfg):
     )
 
     logger.info(f"Downstream model saved at {downstream_save_path}")
-    # Save
     logger.info(f"Model has been saved at {save_state_dict(model, cfg.output_dir, cfg.file_name)}")
 
 
     # -------------- EIG Evaluation --------------- #
     if cfg.eval.EIG:
-        # Set a larger query size
+    
         experiment.n_query_init = cfg.eval.n_query_final
 
         bounds = eval_boed(model, experiment, cfg.eval.T_final - cfg.task.n_context_init, cfg.eval.L_final, cfg.eval.M_final, cfg.eval.batch_size_final, cfg.time_token, stepwise=True)
@@ -551,9 +538,8 @@ def main(cfg):
         logger.info(bounds)
         logger.info(f"PCE: {bounds['pce_mean'][cfg.T-1]:.3f}+-{bounds['pce_err'][cfg.T-1]:.3f}\tNMC: {bounds['nmc_mean'][cfg.T-1]:.3f}+-{bounds['nmc_err'][cfg.T-1]:.3f}")
 
-        # save bounds to file
+       
         save_path = os.path.join(cfg.output_dir, "eval", f"{cfg.file_name.split('.')[0]}_N{cfg.eval.n_query_final}_T{cfg.eval.T_final}.tar")
-        # make dir if not exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         torch.save(bounds, save_path)
         logger.info(f"Bounds have been saved at {save_path}.")
