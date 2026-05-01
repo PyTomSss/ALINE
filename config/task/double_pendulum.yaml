@@ -30,7 +30,7 @@ outcome_scale: 1.0
 # Sequential / non-exchangeable augmentation
 include_time: true
 normalize_time: true
-max_T: ${T}
+max_T: 50
 use_delta_y: true
 
 # Simulator

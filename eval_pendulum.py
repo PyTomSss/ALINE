@@ -292,6 +292,121 @@ def rollout_aline_pendulum(
 
     return out
 
+
+@torch.no_grad()
+def rollout_aline_double_pendulum(
+    model,
+    experiment,
+    cfg,
+    T: int,
+    batch_size: int = 1,
+    n_query: Optional[int] = None,
+    time_token: bool = False,
+    device: Optional[torch.device] = None,
+    theta: Optional[torch.Tensor] = None,
+    xi_position: str = "first",
+):
+    """
+    Runs one ALINE active rollout for HiddenDoublePendulum.
+
+    Returns:
+        model_designs:     [B, T, dim_x]      augmented ALINE inputs
+        simulator_designs: [B, T, dim_xi]     physical controls
+        observations:      [B, T, dim_y]      physical states
+    """
+    model.eval()
+
+    if device is None:
+        device = next(model.parameters()).device
+
+    if n_query is not None:
+        experiment.n_query_init = n_query
+
+    batch = experiment.sample_batch(batch_size)
+
+    for k, v in batch.items():
+        if torch.is_tensor(v):
+            batch[k] = v.to(device)
+
+    if theta is not None:
+        theta = theta.to(device)
+        if theta.ndim == 1:
+            theta = theta[None, :]
+        assert theta.shape[0] == batch_size
+
+        batch.theta = theta
+        batch.target_theta = theta
+
+        if hasattr(experiment, "make_target"):
+            batch.target_all = experiment.make_target(theta)
+        else:
+            batch.target_all = theta
+
+    model_xs = []
+    xis = []
+    ys = []
+    idxs = []
+    log_probs = []
+
+    y0 = batch.current_y.detach().cpu()
+
+    for t in range(T):
+        # Only use this if your ALINE architecture explicitly expects batch.t.
+        # If the wrapper already includes time in query_x, you usually want this False.
+        if time_token:
+            batch.t = torch.tensor([t / T], device=device)
+
+        pred = model.forward(batch)
+
+        design_out = pred.design_out
+        idx = design_out.idx
+
+        idx_squeezed = idx.squeeze(-1) if idx.ndim > 1 else idx
+        batch_arange = torch.arange(batch_size, device=device)
+
+        selected_model_x = batch.query_x[batch_arange, idx_squeezed]
+
+        selected_xi = extract_xi_from_model_x(
+            selected_model_x,
+            cfg=cfg,
+            experiment=experiment,
+            xi_position=xi_position,
+        )
+
+        batch = experiment.update_batch(batch, idx)
+
+        for k, v in batch.items():
+            if torch.is_tensor(v):
+                batch[k] = v.to(device)
+
+        model_xs.append(selected_model_x.detach().cpu())
+        xis.append(selected_xi.detach().cpu())
+        ys.append(batch.current_y.detach().cpu())
+        idxs.append(idx.detach().cpu())
+
+        if hasattr(design_out, "log_prob"):
+            log_probs.append(design_out.log_prob.detach().cpu())
+
+    model_xs = torch.stack(model_xs, dim=1)
+    xis = torch.stack(xis, dim=1)
+    ys = torch.stack(ys, dim=1)
+    idxs = torch.stack(idxs, dim=1)
+
+    out = {
+        "theta": batch.theta.detach().cpu(),
+        "x0": y0,
+        "model_designs": model_xs,
+        "simulator_designs": xis,
+        "observations": ys,
+        "idxs": idxs,
+        "final_batch": batch,
+    }
+
+    if len(log_probs) > 0:
+        out["log_probs"] = torch.stack(log_probs, dim=1)
+
+    return out
+
 # ---------------------------------------------------------------------
 # Plotting utilities
 # ---------------------------------------------------------------------

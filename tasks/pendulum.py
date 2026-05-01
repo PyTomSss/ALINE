@@ -936,7 +936,7 @@ class HiddenDoublePendulum:
             dim=1,
         )
 
-        # Keep true physical state unnormalized.
+        # Keep true physical state unnormalized
         batch.current_y = y_next
 
         batch.t = int(batch.t) + 1
