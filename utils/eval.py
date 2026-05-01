@@ -140,6 +140,7 @@ def eval_EIG_from_history(experiment, theta_0, x, y, L=int(1e6), M=2000, batch_s
 
     return bounds
 
+
 @torch.no_grad()
 def eval_boed(model, experiment, T=30, L=int(1e6), M=2000, batch_size=40, time_token=False, stepwise=False, err_type='se'):
     """ Final evaluation of the EIG bounds for ALINE

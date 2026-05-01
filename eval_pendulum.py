@@ -457,6 +457,68 @@ def plot_pendulum_rollout(
     return fig, axes
 
 
+def plot_double_pendulum_rollout(
+    rollout: Dict[str, torch.Tensor],
+    batch_index: int = 0,
+    title: str = "ALINE rollout on DoublePendulum",
+    save_path: Optional[str] = None,
+):
+    designs = rollout["simulator_designs"][batch_index]  # [T, 2]
+    ys = rollout["observations"][batch_index]            # [T, 4]
+    theta = rollout["theta"][batch_index]                # [4]
+
+    T = ys.shape[0]
+    t_grid = torch.arange(1, T + 1)
+
+    q1 = ys[:, 0]
+    q2 = ys[:, 1]
+    q1d = ys[:, 2]
+    q2d = ys[:, 3]
+
+    xi1 = designs[:, 0]
+    xi2 = designs[:, 1]
+
+    fig, axes = plt.subplots(6, 1, figsize=(10, 12), sharex=True)
+
+    axes[0].plot(t_grid, q1, marker="o")
+    axes[0].set_ylabel("q1")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(t_grid, q2, marker="o")
+    axes[1].set_ylabel("q2")
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(t_grid, q1d, marker="o")
+    axes[2].set_ylabel("q1 dot")
+    axes[2].grid(True, alpha=0.3)
+
+    axes[3].plot(t_grid, q2d, marker="o")
+    axes[3].set_ylabel("q2 dot")
+    axes[3].grid(True, alpha=0.3)
+
+    axes[4].step(t_grid, xi1, where="mid")
+    axes[4].set_ylabel("xi1")
+    axes[4].grid(True, alpha=0.3)
+
+    axes[5].step(t_grid, xi2, where="mid")
+    axes[5].set_xlabel("step")
+    axes[5].set_ylabel("xi2")
+    axes[5].grid(True, alpha=0.3)
+
+    theta_str = ", ".join([f"{v:.3f}" for v in theta.tolist()])
+    fig.suptitle(f"{title}\nθ = [{theta_str}]")
+
+    plt.tight_layout()
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        print(f"Saved figure to {save_path}")
+
+    return fig, axes
+
+
 def plot_phase_portrait(
     rollout: Dict[str, torch.Tensor],
     batch_index: int = 0,
@@ -485,6 +547,48 @@ def plot_phase_portrait(
         print(f"Saved figure to {save_path}")
 
     return fig, ax
+
+
+def plot_double_pendulum_phase_portraits(
+    rollout: Dict[str, torch.Tensor],
+    batch_index: int = 0,
+    title: str = "Double pendulum phase trajectories",
+    save_path: Optional[str] = None,
+):
+    ys = rollout["observations"][batch_index]
+    theta = rollout["theta"][batch_index]
+
+    q1 = ys[:, 0]
+    q2 = ys[:, 1]
+    q1d = ys[:, 2]
+    q2d = ys[:, 3]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    axes[0].plot(q1, q1d, marker="o")
+    axes[0].set_xlabel("q1")
+    axes[0].set_ylabel("q1 dot")
+    axes[0].set_title("First joint")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(q2, q2d, marker="o")
+    axes[1].set_xlabel("q2")
+    axes[1].set_ylabel("q2 dot")
+    axes[1].set_title("Second joint")
+    axes[1].grid(True, alpha=0.3)
+
+    theta_str = ", ".join([f"{v:.3f}" for v in theta.tolist()])
+    fig.suptitle(f"{title}\nθ = [{theta_str}]")
+
+    plt.tight_layout()
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        print(f"Saved figure to {save_path}")
+
+    return fig, axes
 
 
 # ---------------------------------------------------------------------
@@ -564,30 +668,57 @@ def main():
     experiment, model = build_experiment_and_model(cfg, device)
     model = load_aline_weights(model, weight_path, device=device, strict=True)
 
-    # Rollout visualization
-    rollout = rollout_aline_pendulum(
-        model=model,
-        experiment=experiment,
-        cfg=cfg,
-        T=cfg.T - cfg.task.n_context_init,
-        batch_size=1,
-        n_query=cfg.task.n_query_init,
-        time_token=cfg.time_token,
-        device=device,
-        xi_position="first",
-    )
+    if cfg.task.name == "DoublePendulum": 
+        rollout = rollout_aline_double_pendulum(
+            model=model,
+            experiment=experiment,
+            cfg=cfg,
+            T=cfg.T - cfg.task.n_context_init,
+            batch_size=1,
+            n_query=cfg.task.n_query_init,
+            time_token=False,
+            device=device,
+            xi_position="first",
+        )
 
-    plot_pendulum_rollout(
-        rollout,
-        save_path=Path(run_dir) / "eval" / "rollout_timeseries.png",
-    )
+        plot_double_pendulum_rollout(
+            rollout,
+            save_path=Path(run_dir) / "eval" / "double_pendulum_rollout_timeseries.png",
+        )
 
-    plot_phase_portrait(
-        rollout,
-        save_path=Path(run_dir) / "eval" / "rollout_phase.png",
-    )
+        plot_double_pendulum_phase_portraits(
+            rollout,
+            save_path=Path(run_dir) / "eval" / "double_pendulum_phase_portraits.png",
+        )
 
-    plt.show()
+        plt.show()
+
+    else: 
+    
+        # Rollout visualization
+        rollout = rollout_aline_pendulum(
+            model=model,
+            experiment=experiment,
+            cfg=cfg,
+            T=cfg.T - cfg.task.n_context_init,
+            batch_size=1,
+            n_query=cfg.task.n_query_init,
+            time_token=cfg.time_token,
+            device=device,
+            xi_position="first",
+        )
+
+        plot_pendulum_rollout(
+            rollout,
+            save_path=Path(run_dir) / "eval" / "rollout_timeseries.png",
+        )
+
+        plot_phase_portrait(
+            rollout,
+            save_path=Path(run_dir) / "eval" / "rollout_phase.png",
+        )
+
+        plt.show()
 
     # Optional: EIG bounds
     bounds = evaluate_eig(model, experiment, cfg)

@@ -590,6 +590,7 @@ class HiddenDoublePendulum:
     def __init__(
         self,
         dim_xi=2,
+        dim_x=None, 
         dim_y=4,
         dim_theta=4,
         n_target_theta=4,
