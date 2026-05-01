@@ -22,7 +22,7 @@ n_target_theta: 4
 
 # Initial context and candidate pool
 n_context_init: 1
-n_query_init: 200
+n_query_init: 150
 
 # Scaling
 design_scale: [4.0, 2.0]
