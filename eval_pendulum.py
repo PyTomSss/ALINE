@@ -119,6 +119,52 @@ def load_aline_weights(model, weight_path: str, device, strict: bool = True):
     return model
 
 
+def get_dim_xi(cfg, experiment):
+    if hasattr(cfg.task, "dim_xi"):
+        return int(cfg.task.dim_xi)
+    if hasattr(experiment, "dim_xi"):
+        return int(experiment.dim_xi)
+    # Backward compatibility: old setup dim_x == dim_xi
+    return int(cfg.task.dim_x)
+
+
+def extract_xi_from_model_x(x, cfg, experiment, xi_position: str = "first"):
+    """
+    Extract the true simulator design xi from the augmented ALINE x.
+
+    x:
+        [..., dim_x]
+
+    Returns:
+        xi:
+            [..., dim_xi]
+
+    Convention assumed here:
+        x = concat([xi, auxiliary_context_features])
+
+    If your convention is instead x = concat([auxiliary_context_features, xi]),
+    set xi_position="last".
+    """
+
+    dim_xi = get_dim_xi(cfg, experiment)
+
+    if x.shape[-1] == dim_xi:
+        return x
+
+    if x.shape[-1] < dim_xi:
+        raise ValueError(
+            f"Cannot extract dim_xi={dim_xi} from x.shape[-1]={x.shape[-1]}"
+        )
+
+    if xi_position == "first":
+        return x[..., :dim_xi]
+
+    elif xi_position == "last":
+        return x[..., -dim_xi:]
+
+    else:
+        raise ValueError(f"Unknown xi_position: {xi_position}")
+
 # ---------------------------------------------------------------------
 # Rollout utilities
 # ---------------------------------------------------------------------
@@ -127,18 +173,28 @@ def load_aline_weights(model, weight_path: str, device, strict: bool = True):
 def rollout_aline_pendulum(
     model,
     experiment,
+    cfg,
     T: int,
     batch_size: int = 1,
     n_query: Optional[int] = None,
     time_token: bool = False,
     device: Optional[torch.device] = None,
     theta: Optional[torch.Tensor] = None,
+    xi_position: str = "first",
 ):
     """
     Runs one ALINE active experiment rollout.
 
+    Important distinction:
+        model_designs:
+            selected augmented x seen by ALINE, shape [B, T, dim_x]
+
+        simulator_designs:
+            true simulator controls xi, shape [B, T, dim_xi]
+
     Returns:
-        dict with theta, selected designs, observations, selected indices, log_probs.
+        dict with theta, model_designs, simulator_designs, observations,
+        selected indices, log_probs.
     """
 
     model.eval()
@@ -151,6 +207,10 @@ def rollout_aline_pendulum(
 
     batch = experiment.sample_batch(batch_size)
 
+    for k, v in batch.items():
+        if torch.is_tensor(v):
+            batch[k] = v.to(device)
+
     if theta is not None:
         theta = theta.to(device)
         if theta.ndim == 1:
@@ -159,12 +219,12 @@ def rollout_aline_pendulum(
         batch.theta = theta
         batch.target_all = theta
 
-    xs = []
+    model_xs = []
+    xis = []
     ys = []
     idxs = []
     log_probs = []
 
-    # Initial observation, usually y0 = (angle, angular velocity)
     if hasattr(batch, "current_y"):
         y0 = batch.current_y.detach().cpu()
     else:
@@ -179,32 +239,58 @@ def rollout_aline_pendulum(
         design_out = pred.design_out
         idx = design_out.idx
 
-        # selected design before updating the batch
         idx_squeezed = idx.squeeze(-1) if idx.ndim > 1 else idx
         batch_arange = torch.arange(batch_size, device=device)
-        selected_x = batch.query_x[batch_arange, idx_squeezed]
+
+        # This is the augmented ALINE input x.
+        selected_model_x = batch.query_x[batch_arange, idx_squeezed]
+
+        # This is the true physical design xi.
+        selected_xi = extract_xi_from_model_x(
+            selected_model_x,
+            cfg=cfg,
+            experiment=experiment,
+            xi_position=xi_position,
+        )
 
         batch = experiment.update_batch(batch, idx)
 
-        xs.append(selected_x.detach().cpu())
-        ys.append(batch.current_y.detach().cpu())
+        for k, v in batch.items():
+            if torch.is_tensor(v):
+                batch[k] = v.to(device)
+
+        model_xs.append(selected_model_x.detach().cpu())
+        xis.append(selected_xi.detach().cpu())
+
+        if hasattr(batch, "current_y"):
+            ys.append(batch.current_y.detach().cpu())
+        else:
+            ys.append(batch.context_y[:, -1].detach().cpu())
+
         idxs.append(idx.detach().cpu())
-        log_probs.append(design_out.log_prob.detach().cpu())
 
-    xs = torch.stack(xs, dim=1)          # [B, T, dim_x]
-    ys = torch.stack(ys, dim=1)          # [B, T, dim_y]
-    idxs = torch.stack(idxs, dim=1)      # [B, T, ...]
-    log_probs = torch.stack(log_probs, dim=1)  # [B, T]
+        if hasattr(design_out, "log_prob"):
+            log_probs.append(design_out.log_prob.detach().cpu())
 
-    return {
-        "theta": batch.theta.detach().cpu(),
+    model_xs = torch.stack(model_xs, dim=1)   # [B, T, dim_x]
+    xis = torch.stack(xis, dim=1)             # [B, T, dim_xi]
+    ys = torch.stack(ys, dim=1)               # [B, T, dim_y]
+    idxs = torch.stack(idxs, dim=1)
+
+    out = {
+        "theta": batch.theta.detach().cpu() if hasattr(batch, "theta") else batch.target_all.detach().cpu(),
         "x0": y0,
-        "designs": xs,
+        "model_designs": model_xs,
+        "simulator_designs": xis,
         "observations": ys,
         "idxs": idxs,
-        "log_probs": log_probs,
+        "final_batch": batch,
     }
 
+    if len(log_probs) > 0:
+        out["log_probs"] = torch.stack(log_probs, dim=1)
+
+    return out
 
 # ---------------------------------------------------------------------
 # Plotting utilities
@@ -216,8 +302,8 @@ def plot_pendulum_rollout(
     title: str = "ALINE rollout on SimplePendulum",
     save_path: Optional[str] = None,
 ):
-    designs = rollout["designs"][batch_index]          # [T, dim_x]
-    ys = rollout["observations"][batch_index]          # [T, dim_y]
+    designs = rollout["simulator_designs"][batch_index]  # [T, dim_xi]
+    ys = rollout["observations"][batch_index]
     theta = rollout["theta"][batch_index]
 
     T = ys.shape[0]
@@ -239,7 +325,7 @@ def plot_pendulum_rollout(
 
     axes[2].step(t_grid, control, where="mid")
     axes[2].set_xlabel("step")
-    axes[2].set_ylabel("selected control")
+    axes[2].set_ylabel("selected control xi")
     axes[2].grid(True, alpha=0.3)
 
     theta_str = ", ".join([f"{v:.3f}" for v in theta.tolist()])
@@ -302,6 +388,7 @@ def evaluate_eig(
     batch_size=None,
     stepwise=True,
     L_chunk=2048,
+    xi_position: str = "first",
 ):
     if T_eval is None:
         T_eval = cfg.eval.T_final - cfg.task.n_context_init
@@ -324,14 +411,15 @@ def evaluate_eig(
             else cfg.eval.batch_size
         )
 
-    M = 100
-    L= 5000
-    stepwise = False
-    batch_size = 25
+    T_eval = 50
+    L = 50000
+    M = 500
+    stepwise=False
 
     return eval_boed_pendulum(
         model=model,
         experiment=experiment,
+        #cfg=cfg,
         T=T_eval,
         L=L,
         M=M,
@@ -339,7 +427,9 @@ def evaluate_eig(
         time_token=cfg.time_token,
         stepwise=stepwise,
         L_chunk=L_chunk,
+        xi_position=xi_position,
     )
+
 
 # ---------------------------------------------------------------------
 # Example main
@@ -347,9 +437,9 @@ def evaluate_eig(
 
 def main():
     #run_dir = "checkpoints/61643_1/"
-    run_dir = "checkpoints/76183_1/"
+    run_dir = "checkpoints/76919_1/"
     #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_50000.pth"
-    weight_path = "checkpoints/76183_1/model/aae_Pendulum_d1_1.pth"
+    weight_path = "checkpoints/76919_1/model/aae_Pendulum_dx4_dxi1_T50_1.pth"
 
 
     cfg = load_hydra_cfg(run_dir)
@@ -363,11 +453,13 @@ def main():
     rollout = rollout_aline_pendulum(
         model=model,
         experiment=experiment,
+        cfg=cfg,
         T=cfg.T - cfg.task.n_context_init,
         batch_size=1,
         n_query=cfg.task.n_query_init,
         time_token=cfg.time_token,
         device=device,
+        xi_position="first",
     )
 
     plot_pendulum_rollout(

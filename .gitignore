@@ -43,3 +43,4 @@ figures/
 data/
 *.slurm
 *checkpoints/
+eval_outputs/

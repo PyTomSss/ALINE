@@ -266,17 +266,16 @@ import numpy as np
 # ---------------------------------------------------------------------
 
 def _sample_theta(experiment, shape):
-    """
-    Compatible avec un sample_theta qui accepte seulement un int.
-    shape peut être int, tuple ou list.
-    """
     if isinstance(shape, int):
         return experiment.sample_theta(shape)
 
     shape = tuple(shape)
     n = int(np.prod(shape))
+
     theta = experiment.sample_theta(n)
-    return theta.reshape(*shape, experiment.dim_theta)
+    dim_theta = theta.shape[-1]
+
+    return theta.reshape(*shape, dim_theta)
 
 
 def _initial_y(experiment, B, device):
@@ -287,42 +286,154 @@ def _initial_y(experiment, B, device):
 # Rollout ALINE pour SimplePendulum
 # ---------------------------------------------------------------------
 
-@torch.no_grad()
-def get_traces_pendulum(model, experiment, T=30, batch_size=40, time_token=False):
-    """
-    Simule T étapes avec le modèle ALINE et retourne :
-        theta_0: [B, dim_theta]
-        x:       [B, T, dim_x]
-        y:       [B, T, dim_y]
+def _move_batch_to_device(batch, device):
+    for k, v in batch.items():
+        if torch.is_tensor(v):
+            batch[k] = v.to(device)
+    return batch
 
-    Important :
-    - on enlève le contexte initial dummy.
-    - on n'appelle pas experiment.unnormalise_design.
+
+def _get_dim_xi(experiment):
+    """
+    Returns the true simulator design dimension.
+    Falls back to dim_x for old experiments.
+    """
+    if hasattr(experiment, "dim_xi"):
+        return int(experiment.dim_xi)
+
+    if hasattr(experiment, "simulator") and hasattr(experiment.simulator, "dim_xi"):
+        return int(experiment.simulator.dim_xi)
+
+    # Backward compatibility: old setup had dim_x == dim_xi.
+    return int(experiment.dim_x)
+
+
+def _extract_xi_from_x(x, experiment, xi_position="first"):
+    """
+    Extracts the physical control xi from the augmented ALINE input x.
+
+    x:
+        [..., dim_x]
+
+    Returns:
+        xi:
+            [..., dim_xi]
+
+    Convention:
+        if xi_position == "first":
+            x = concat([xi, previous_observation, ...])
+
+        if xi_position == "last":
+            x = concat([previous_observation, ..., xi])
+    """
+
+    dim_xi = _get_dim_xi(experiment)
+
+    if x.shape[-1] == dim_xi:
+        return x
+
+    if x.shape[-1] < dim_xi:
+        raise ValueError(
+            f"Cannot extract dim_xi={dim_xi} from x.shape[-1]={x.shape[-1]}."
+        )
+
+    if xi_position == "first":
+        return x[..., :dim_xi]
+
+    elif xi_position == "last":
+        return x[..., -dim_xi:]
+
+    else:
+        raise ValueError(f"Unknown xi_position={xi_position}.")
+    
+
+@torch.no_grad()
+def get_traces_pendulum(
+    model,
+    experiment,
+    T=30,
+    batch_size=40,
+    time_token=False,
+    xi_position="first",
+    return_augmented_x=True,
+):
+    """
+    Simule T étapes avec le modèle ALINE.
+
+    Returns
+    -------
+    theta_0:
+        [B, dim_theta]
+
+    x:
+        [B, T, dim_x]
+        Augmented ALINE inputs stored in context_x.
+
+    xi:
+        [B, T, dim_xi]
+        True simulator controls extracted from x.
+
+    y:
+        [B, T, dim_y]
+
+    Important:
+    - x is what ALINE sees.
+    - xi is what the simulator likelihood uses.
     """
 
     model.eval()
     device = experiment.device if hasattr(experiment, "device") else next(model.parameters()).device
 
     batch = experiment.sample_batch(batch_size)
+    batch = _move_batch_to_device(batch, device)
+
+    xs = []
+    xis = []
+    ys = []
 
     for t in range(T):
         if time_token:
+            # Keep your convention. You may also use t / T if that is what training used.
             batch.t = torch.tensor([(T - t) / T], device=device)
 
         pred = model.forward(batch)
         idx = pred.design_out.idx
 
+        idx_flat = idx.squeeze(-1) if idx.ndim > 1 else idx
+        batch_arange = torch.arange(batch_size, device=device)
+
+        # Augmented model input selected by ALINE.
+        x_t = batch.query_x[batch_arange, idx_flat]  # [B, dim_x]
+
+        # Physical simulator design.
+        xi_t = _extract_xi_from_x(
+            x_t,
+            experiment=experiment,
+            xi_position=xi_position,
+        )  # [B, dim_xi]
+
         batch = experiment.update_batch(batch, idx)
+        batch = _move_batch_to_device(batch, device)
 
-    theta_0 = batch.theta  # [B, dim_theta]
+        if hasattr(batch, "current_y"):
+            y_t = batch.current_y
+        else:
+            y_t = batch.context_y[:, -1]
 
-    # Remove initial dummy context.
-    n0 = getattr(experiment, "n_context_init", 1)
-    x = batch.context_x[:, n0:]  # [B, T, dim_x]
-    y = batch.context_y[:, n0:]  # [B, T, dim_y]
+        xs.append(x_t)
+        xis.append(xi_t)
+        ys.append(y_t)
 
-    return theta_0, x, y
+    theta_0 = batch.theta if hasattr(batch, "theta") else batch.target_all
 
+    x = torch.stack(xs, dim=1)    # [B, T, dim_x]
+    xi = torch.stack(xis, dim=1)  # [B, T, dim_xi]
+    y = torch.stack(ys, dim=1)    # [B, T, dim_y]
+
+    if return_augmented_x:
+        return theta_0, x, xi, y
+
+    return theta_0, xi, y
 
 
 # ---------------------------------------------------------------------
@@ -330,34 +441,48 @@ def get_traces_pendulum(model, experiment, T=30, batch_size=40, time_token=False
 # ---------------------------------------------------------------------
 
 @torch.no_grad()
-def history_logp_pendulum(experiment, theta, x, y, stepwise=False):
+def history_logp_pendulum(experiment, theta, xi, y, stepwise=False):
     """
-    Computes log p(y_{1:T} | theta, x_{1:T}) for SimplePendulum.
+    Computes log p(y_{1:T} | theta, xi_{1:T}) for SimplePendulum.
 
-    Args:
-        theta:
-            [B, dim_theta] or [S, B, dim_theta]
-        x:
-            [B, T, dim_x]
-        y:
-            [B, T, dim_y]
-        stepwise:
-            if False: returns cumulative logp over full trajectory
-            if True: returns cumulative logp at each time step
+    Args
+    ----
+    theta:
+        [B, dim_theta] or [S, B, dim_theta]
 
-    Returns:
-        if theta is [B, D]:
-            [B] if not stepwise else [B, T]
-        if theta is [S, B, D]:
-            [S, B] if not stepwise else [S, B, T]
+    xi:
+        [B, T, dim_xi]
+        True physical controls.
+
+    y:
+        [B, T, dim_y]
+
+    stepwise:
+        if False: returns cumulative logp over full trajectory
+        if True: returns cumulative logp at each time step
+
+    Returns
+    -------
+    if theta is [B, D]:
+        [B] if not stepwise else [B, T]
+
+    if theta is [S, B, D]:
+        [S, B] if not stepwise else [S, B, T]
     """
 
-    device = x.device
-    B, T, dim_x = x.shape
+    device = xi.device
+    B, T, dim_xi = xi.shape
     dim_y = y.shape[-1]
 
+    expected_dim_xi = _get_dim_xi(experiment)
+    if dim_xi != expected_dim_xi:
+        raise ValueError(
+            f"history_logp_pendulum expected xi.shape[-1]={expected_dim_xi}, "
+            f"got {dim_xi}. You probably passed augmented x instead of xi."
+        )
+
     theta = theta.to(device)
-    x = x.to(device)
+    xi = xi.to(device)
     y = y.to(device)
 
     if theta.ndim == 2:
@@ -370,7 +495,7 @@ def history_logp_pendulum(experiment, theta, x, y, stepwise=False):
             logp_t = experiment.simulator._outcome_logp(
                 y=y[:, t],
                 theta=theta,
-                design=x[:, t],
+                design=xi[:, t],
                 last_y=y_prev,
             )  # [B]
 
@@ -393,12 +518,12 @@ def history_logp_pendulum(experiment, theta, x, y, stepwise=False):
 
         for t in range(T):
             y_t = y[:, t].unsqueeze(0).expand(S, B, dim_y)
-            x_t = x[:, t].unsqueeze(0).expand(S, B, dim_x)
+            xi_t = xi[:, t].unsqueeze(0).expand(S, B, dim_xi)
 
             logp_t = experiment.simulator._outcome_logp(
                 y=y_t,
                 theta=theta,
-                design=x_t,
+                design=xi_t,
                 last_y=y_prev,
             )  # [S, B]
 
@@ -411,8 +536,7 @@ def history_logp_pendulum(experiment, theta, x, y, stepwise=False):
         return cum_logps if stepwise else cum_logps[:, :, -1]
 
     else:
-        raise ValueError(f"Unexpected theta shape: {theta.shape}")
-    
+        raise ValueError(f"Unexpected theta shape: {theta.shape}")  
 
 # ---------------------------------------------------------------------
 # EIG bounds for SimplePendulum
@@ -422,7 +546,7 @@ def history_logp_pendulum(experiment, theta, x, y, stepwise=False):
 def compute_EIG_from_history_pendulum(
     experiment,
     theta_0,
-    x,
+    xi,
     y,
     L=10000,
     batch_size=None,
@@ -432,37 +556,49 @@ def compute_EIG_from_history_pendulum(
     """
     PCE / NMC bounds for SimplePendulum.
 
-    Args:
-        theta_0: [B, dim_theta]
-        x:       [B, T, dim_x]
-        y:       [B, T, dim_y]
-        L:       number of contrastive theta samples
-        stepwise:
-            False -> returns [B]
-            True  -> returns [B, T]
+    Args
+    ----
+    theta_0:
+        [B, dim_theta]
 
-    Returns:
-        pce: [B] or [B, T]
-        nmc: [B] or [B, T]
+    xi:
+        [B, T, dim_xi]
+
+    y:
+        [B, T, dim_y]
+
+    L:
+        number of contrastive theta samples
+
+    stepwise:
+        False -> returns [B]
+        True  -> returns [B, T]
+
+    Returns
+    -------
+    pce:
+        [B] or [B, T]
+
+    nmc:
+        [B] or [B, T]
     """
 
-    device = x.device
+    device = xi.device
     theta_0 = theta_0.to(device)
-    x = x.to(device)
+    xi = xi.to(device)
     y = y.to(device)
 
-    B = x.shape[0]
+    B = xi.shape[0]
 
-    # True likelihood log p(y | theta_0, x)
+    # True likelihood log p(y | theta_0, xi)
     logp_true = history_logp_pendulum(
-        experiment,
-        theta_0,
-        x,
-        y,
+        experiment=experiment,
+        theta=theta_0,
+        xi=xi,
+        y=y,
         stepwise=stepwise,
     )  # [B] or [B, T]
 
-    # Streaming logsumexp over contrastive samples.
     contrastive_lse = None
     n_done = 0
 
@@ -473,10 +609,10 @@ def compute_EIG_from_history_pendulum(
         # theta_c: [l_now, B, dim_theta]
 
         logp_c = history_logp_pendulum(
-            experiment,
-            theta_c,
-            x,
-            y,
+            experiment=experiment,
+            theta=theta_c,
+            xi=xi,
+            y=y,
             stepwise=stepwise,
         )  # [l_now, B] or [l_now, B, T]
 
@@ -489,18 +625,16 @@ def compute_EIG_from_history_pendulum(
 
         n_done += l_now
 
-    # PCE denominator includes theta_0 + L contrastives.
     pce_den_lse = torch.logaddexp(logp_true, contrastive_lse)
 
     log_L_plus_1 = torch.log(torch.tensor(float(L + 1), device=device))
     log_L = torch.log(torch.tensor(float(L), device=device))
 
     pce = log_L_plus_1 + logp_true - pce_den_lse
-
-    # NMC denominator uses only contrastive samples.
     nmc = log_L + logp_true - contrastive_lse
 
     return pce, nmc
+
 
 
 @torch.no_grad()
@@ -515,9 +649,14 @@ def eval_boed_pendulum(
     stepwise=False,
     err_type="se",
     L_chunk=2048,
+    xi_position="first",
 ):
     """
-    Replacement for eval_boed, compatible with SimplePendulum.
+    Replacement for eval_boed, compatible with SimplePendulum
+    when dim_x and dim_xi are dissociated.
+
+    ALINE sees augmented x of dimension dim_x.
+    The simulator likelihood uses xi of dimension dim_xi.
     """
 
     model.eval()
@@ -530,18 +669,29 @@ def eval_boed_pendulum(
     for step in range(max_step):
         b_now = min(batch_size, M - step * batch_size)
 
-        theta_0, x, y = get_traces_pendulum(
+        theta_0, x_aug, xi, y = get_traces_pendulum(
             model=model,
             experiment=experiment,
             T=T,
             batch_size=b_now,
             time_token=time_token,
+            xi_position=xi_position,
+            return_augmented_x=True,
         )
+
+        # Optional but useful sanity check on first batch.
+        if step == 0:
+            print("x_aug.shape:", tuple(x_aug.shape))
+            print("xi.shape:", tuple(xi.shape))
+            print("y.shape:", tuple(y.shape))
+            print("theta_0.shape:", tuple(theta_0.shape))
+            print("experiment.dim_x:", getattr(experiment, "dim_x", None))
+            print("experiment.dim_xi:", getattr(experiment, "dim_xi", None))
 
         pce, nmc = compute_EIG_from_history_pendulum(
             experiment=experiment,
             theta_0=theta_0,
-            x=x,
+            xi=xi,
             y=y,
             L=L,
             batch_size=b_now,
@@ -588,4 +738,3 @@ def eval_boed_pendulum(
     bounds.nmc_err = nmc_err
 
     return bounds
-

@@ -1,0 +1,12 @@
+[
+  {
+    "checkpoint": "checkpoints/downstream_nets/downstream_theta_predictor_logmse_100k.pt",
+    "aline_path": "./checkpoints_after_burning/model/aae_Location_d2_1_epoch_100000.pth",
+    "T_eval": 30,
+    "/mse": 0.008197493851184845,
+    "/mse_se": 0.0005368457641452551,
+    "/logmse": -6.463057518005371,
+    "/logmse_se": 0.04212762415409088,
+    "/n_examples": 1000
+  }
+]
