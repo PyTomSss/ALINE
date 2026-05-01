@@ -67,57 +67,58 @@ def _repeat_first_dim(x: torch.Tensor, repeats: int) -> torch.Tensor:
 
 def class_logits_from_posterior(
     posterior_out,
-    num_classes: int = 10,
-    use_mean_over_targets: bool = True,
+    num_classes: int | None = None,
 ):
     """
-    Convert ALINE Gaussian-mixture posterior over one-hot labels into class logits.
+    Extract class logits from the new ALINE posterior head.
 
-    For each class c, define:
-
-        logit_c = log p(one_hot(c) | history)
-
-    using the same compute_ll used during training.
-
-    posterior_out must contain:
-        mixture_means
-        mixture_stds
-        mixture_weights
+    Expected posterior_out fields depending on your implementation:
+        - logits
+        - class_logits
+        - pred_logits
+        - mixture_means, if you temporarily stored logits there
 
     Returns
     -------
     logits:
-        [B, num_classes]
+        [B, C]
     """
-    means = posterior_out.mixture_means
-    stds = posterior_out.mixture_stds
-    weights = posterior_out.mixture_weights
 
-    device = means.device
-    B = means.shape[0]
+    if hasattr(posterior_out, "logits"):
+        logits = posterior_out.logits
 
-    eye = torch.eye(num_classes, device=device, dtype=means.dtype)  # [C, C]
-    targets = eye.unsqueeze(0).expand(B, num_classes, num_classes)  # [B, C, C]
-    targets_flat = targets.reshape(B * num_classes, num_classes)   # [B*C, C]
+    elif hasattr(posterior_out, "class_logits"):
+        logits = posterior_out.class_logits
 
-    means_rep = _repeat_first_dim(means, num_classes)
-    stds_rep = _repeat_first_dim(stds, num_classes)
-    weights_rep = _repeat_first_dim(weights, num_classes)
+    elif hasattr(posterior_out, "pred_logits"):
+        logits = posterior_out.pred_logits
 
-    # compute_ll returns per-target-dimension log-likelihood: [B*C, num_classes]
-    target_ll = compute_ll(
-        targets_flat,
-        means_rep,
-        stds_rep,
-        weights_rep,
-    )
+    elif hasattr(posterior_out, "mixture_means"):
+        # Fallback only if your new head still stores logits in mixture_means.
+        logits = posterior_out.mixture_means
 
-    if use_mean_over_targets:
-        class_scores = target_ll.mean(dim=-1)  # [B*C]
     else:
-        class_scores = target_ll.sum(dim=-1)   # [B*C]
+        raise AttributeError(
+            "Could not find logits in posterior_out. Expected one of: "
+            "`logits`, `class_logits`, `pred_logits`, or `mixture_means`."
+        )
 
-    logits = class_scores.view(B, num_classes)  # [B, C]
+    if logits.ndim == 3:
+        # Common accidental shape: [B, 1, C] or [B, K, C].
+        # If K=1, squeeze it. If K>1, average over K as a fallback.
+        if logits.shape[1] == 1:
+            logits = logits[:, 0, :]
+        else:
+            logits = logits.mean(dim=1)
+
+    if logits.ndim != 2:
+        raise ValueError(f"Expected logits of shape [B, C], got {logits.shape}.")
+
+    if num_classes is not None and logits.shape[-1] != num_classes:
+        raise ValueError(
+            f"Expected {num_classes} classes, got logits.shape[-1]={logits.shape[-1]}."
+        )
+
     return logits
 
 
@@ -146,7 +147,7 @@ def rollout_and_get_logits(
     batch = _move_batch_to_device(batch, device)
 
     for t in range(T):
-        if cfg.time_token:
+        if getattr(cfg, "time_token", False):
             batch.t = torch.tensor([t / T], device=device)
 
         pred = model.forward(batch)
@@ -156,7 +157,7 @@ def rollout_and_get_logits(
         batch = _move_batch_to_device(batch, device)
 
     # Final posterior after T observed patches.
-    if cfg.time_token:
+    if getattr(cfg, "time_token", False):
         batch.t = torch.tensor([1.0], device=device)
 
     pred = model.forward(batch)
@@ -165,13 +166,25 @@ def rollout_and_get_logits(
     logits = class_logits_from_posterior(
         posterior_out,
         num_classes=num_classes,
-        use_mean_over_targets=True,
     )
 
-    labels = batch.labels.long().to(device)
+    if hasattr(batch, "labels"):
+        labels = batch.labels.long().to(device)
+    elif hasattr(batch, "label"):
+        labels = batch.label.long().to(device)
+    elif hasattr(batch, "target_all"):
+        target_all = batch.target_all.to(device)
+        labels = target_all.argmax(dim=-1).long() if target_all.ndim == 2 else target_all.long()
+    elif hasattr(batch, "theta"):
+        theta = batch.theta.to(device)
+        labels = theta.argmax(dim=-1).long() if theta.ndim == 2 else theta.long()
+    else:
+        raise AttributeError(
+            "Could not infer labels from batch. Expected one of: "
+            "`labels`, `label`, `target_all`, or `theta`."
+        )
 
     return logits, labels
-
 
 @torch.no_grad()
 def evaluate_split(
@@ -628,7 +641,7 @@ def main(cfg):
 
         print(f"Saved design visualization to {save_path}")
 
-        
+
 if __name__ == "__main__":
     main()
     

@@ -7,7 +7,7 @@ defaults:
 
 seed: 123
 
-max_epoch: 60000
+max_epoch: 90000
 burning_epoch: 10000
 batch_size: 200
 
