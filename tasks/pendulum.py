@@ -741,24 +741,41 @@ class HiddenDoublePendulum:
         Sample candidate physical controls and augment them with current state
         and optional time encoding.
 
-        Returns:
-            query_x: [B, n_query_init, dim_x]
+        For DoublePendulum, the physical controls are constrained as:
 
-        Each candidate is:
+            xi1 in [-4, 4]
+            xi2 in [-2, 2]
 
-            [xi_candidate, current_y, time_feature].
+        if design_scale = [4.0, 2.0].
         """
-        xi_candidates = (
+        design_scale = torch.as_tensor(
+            self.design_scale,
+            device=self.device,
+            dtype=torch.float32,
+        )
+
+        if design_scale.ndim == 0:
+            design_scale = design_scale.repeat(self.dim_xi)
+
+        if design_scale.shape != (self.dim_xi,):
+            raise ValueError(
+                f"design_scale must be a scalar or have shape [{self.dim_xi}], "
+                f"got shape {tuple(design_scale.shape)}"
+            )
+
+        xi_unit = (
             2.0
-            * self.design_scale
             * torch.rand(
                 batch_size,
                 self.n_query_init,
                 self.dim_xi,
                 device=self.device,
+                dtype=design_scale.dtype,
             )
-            - self.design_scale
+            - 1.0
         )
+
+        xi_candidates = xi_unit * design_scale[None, None, :]
 
         if current_y is None:
             current_y = torch.zeros(
@@ -784,6 +801,8 @@ class HiddenDoublePendulum:
                 f"current_y last dim should be dim_y={self.dim_y}, "
                 f"got {current_y.shape[-1]}"
             )
+
+        current_y = current_y.to(device=self.device, dtype=xi_candidates.dtype)
 
         prev_y_rep = current_y[:, None, :].expand(
             batch_size,
@@ -814,7 +833,8 @@ class HiddenDoublePendulum:
             )
 
         return query_x
-
+    
+    
     def sample_batch(self, batch_size):
         """
         Sample a fresh ALINE batch.

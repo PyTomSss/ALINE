@@ -25,7 +25,7 @@ n_context_init: 1
 n_query_init: 200
 
 # Scaling
-design_scale: 1.0
+design_scale: [4.0, 2.0]
 outcome_scale: 1.0
 
 # Sequential / non-exchangeable augmentation
