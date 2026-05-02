@@ -656,9 +656,12 @@ def evaluate_eig(
 
 def main():
     #run_dir = "checkpoints/61643_1/"
-    run_dir = "checkpoints/76919_1/"
+    #run_dir = "checkpoints/76919_1/"
+    run_dir = "checkpoints/77816_1"
+
     #weight_path = "checkpoints/61643_1/checkpoints_after_burning/model/aae_Pendulum_d1_1_epoch_50000.pth"
-    weight_path = "checkpoints/76919_1/model/aae_Pendulum_dx4_dxi1_T50_1.pth"
+    #weight_path = "checkpoints/76919_1/model/aae_Pendulum_dx4_dxi1_T50_1.pth"
+    weight_path = "checkpoints/77816_1/model/aae_DoublePendulum_dx7_dxi2_T50_1.pth"
 
 
     cfg = load_hydra_cfg(run_dir)

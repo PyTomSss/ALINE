@@ -3,7 +3,7 @@ defaults:
   - encoder: encoder
   - embedder: embedder
   - head: head
-  - task: pendulum
+  - task: double_pendulum
 
 seed: 123
 fix_seed: True
@@ -20,7 +20,8 @@ batch_size: 200
 # -------------------------
 # Pretrained ALINE policy
 # -------------------------
-pretrained_aline_path: ./checkpoints_after_burning/model/aae_Pendulum_dx4_dxi1_T50_1_epoch_100000.pth
+#pretrained_aline_path: ./checkpoints_after_burning/model/aae_Pendulum_dx4_dxi1_T50_1_epoch_100000.pth
+pretrained_aline_path: ./model_double/aae_DoublePendulum_dx7_dxi2_T50_1.pth
 freeze_aline: True
 
 # The old ALINE training loss is disabled.
@@ -30,7 +31,7 @@ train_aline: False
 # Downstream theta predictor
 # -------------------------
 downstream:
-  max_epoch: 50000
+  max_epoch: 1000
 
   # Optimizer
   optimizer: AdamW
@@ -49,7 +50,7 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: weighted_mse
+  loss: mse
   eps_loss: 1e-6
   theta_weights: [0.1, 1.0, 2.0]
 
