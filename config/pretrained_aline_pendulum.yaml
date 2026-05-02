@@ -31,7 +31,7 @@ train_aline: False
 # Downstream theta predictor
 # -------------------------
 downstream:
-  max_epoch: 50000
+  max_epoch: 100000
 
   # Optimizer
   optimizer: AdamW
