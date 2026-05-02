@@ -1,0 +1,95 @@
+defaults:
+  - _self_
+  - encoder: encoder
+  - embedder: embedder
+  - head: head
+  - task: pendulum
+
+seed: 123
+fix_seed: True
+device: cuda
+
+# -------------------------
+# Rollout settings
+# -------------------------
+T: 50
+min_T: 50
+time_token: False
+batch_size: 200
+
+# -------------------------
+# Pretrained ALINE policy
+# -------------------------
+pretrained_aline_path: ./checkpoints_after_burning/model/aae_Pendulum_dx4_dxi1_T50_1_epoch_100000.pth
+freeze_aline: True
+
+# The old ALINE training loss is disabled.
+train_aline: False
+
+# -------------------------
+# Downstream theta predictor
+# -------------------------
+downstream:
+  max_epoch: 1000
+
+  # Optimizer
+  optimizer: AdamW
+  lr: 1e-3
+  weight_decay: 0.0
+
+  # Scheduler
+  scheduler: ExponentialLR
+  gamma: 0.95
+  annealing_freq: 2000
+
+  # Architecture
+  hidden_dims: [512, 256, 128]
+  activation: SiLU
+  dropout: 0.0
+
+  # Training
+  clip_grads: True
+  loss: mse
+  eps_loss: 1e-6
+
+  # Logging / checkpoints
+  verbose: 5000000
+  checkpoint: 10000
+  checkpoint_name: downstream_ckpt.tar
+  file_name: downstream_theta_predictor.pt
+
+# -------------------------
+# Evaluation
+# -------------------------
+eval:
+  downstream_eval: True
+  batch_size: 2000
+  T_final: 30
+
+  # These are for BOED/EIG eval of ALINE itself.
+  # Not needed for supervised downstream training unless you still want them.
+  EIG: False
+  L: 50000
+  M: 2000
+  L_final: 1000000
+  M_final: 2000
+  batch_size_final: 200
+  n_query_final: 2000
+
+run_id: 1
+
+# -------------------------
+# Output
+# -------------------------
+output_dir: ./checkpoints/downstream_aline/
+file_name: downstream_${task.name}_T${T}_${run_id}.pt
+
+wandb:
+  group: ${task.name}
+  project: "downstream_trainings"
+  use_wandb: False
+  run_name: downstream-${task.name}-${task.dim_x}D-T${T}-${now:%Y-%m-%d_%H-%M}
+
+hydra:
+  run:
+    dir: outputs/hydra/downstream/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -22,151 +22,84 @@ from utils import create_logger, set_seed, save_state_dict, compute_ll, load_che
 os.environ["HYDRA_FULL_ERROR"] = "1"
 
 class HistoryMLPThetaPredictor(nn.Module):
-    """
-    MLP downstream that predicts theta from flattened design/observation history.
-
-    Input:
-        xi_history: [B, T, dim_x]
-        y_history:  [B, T, dim_y]
-
-    Output:
-        theta_pred: [B, n_sources, source_dim]
-    """
-
     def __init__(
         self,
-        dim_x: int,
-        dim_y: int,
-        T: int,
-        n_sources: int = 2,
-        source_dim: int = 2,
-        hidden_dims=(512, 256, 128),
-        activation="SiLU",
-        dropout: float = 0.0,
+        dim_x,
+        dim_y,
+        T,
+        dim_theta,
+        hidden_dims=(256, 256),
+        activation="silu",
+        dropout=0.0,
     ):
         super().__init__()
 
         self.dim_x = dim_x
         self.dim_y = dim_y
         self.T = T
-        self.n_sources = n_sources
-        self.source_dim = source_dim
-        self.theta_dim = n_sources * source_dim
+        self.dim_theta = dim_theta
 
         input_dim = T * (dim_x + dim_y)
 
-        act_cls = getattr(nn, activation)
+        if activation == "relu":
+            act = nn.ReLU
+        elif activation == "gelu":
+            act = nn.GELU
+        elif activation == "silu":
+            act = nn.SiLU
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
 
         layers = []
-        prev = input_dim
+        prev_dim = input_dim
 
-        for h in hidden_dims:
-            layers.append(nn.Linear(prev, h))
-            layers.append(act_cls())
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(act())
             if dropout > 0:
                 layers.append(nn.Dropout(dropout))
-            prev = h
+            prev_dim = hidden_dim
 
-        layers.append(nn.Linear(prev, self.theta_dim))
+        layers.append(nn.Linear(prev_dim, dim_theta))
 
         self.net = nn.Sequential(*layers)
 
-    def forward(self, xi_history, y_history):
+    def forward(self, x_history, y_history):
         """
-        xi_history: [B, T, dim_x]
-        y_history:  [B, T, dim_y]
+        x_history: [B, T, dim_x]
+        y_history: [B, T, dim_y]
+
+        returns:
+            theta_pred: [B, dim_theta]
         """
 
-        h = torch.cat([xi_history, y_history], dim=-1)  # [B, T, dim_x + dim_y]
-        h = h.flatten(start_dim=1)                      # [B, T * (dim_x + dim_y)]
+        B, T, _ = x_history.shape
 
-        theta_pred = self.net(h)                        # [B, 4]
-        theta_pred = theta_pred.view(
-            -1, self.n_sources, self.source_dim
-        )                                               # [B, 2, 2]
+        assert T == self.T, f"Expected T={self.T}, got T={T}"
 
-        return theta_pred    
+        h = torch.cat([x_history, y_history], dim=-1)
+        h = h.reshape(B, T * (self.dim_x + self.dim_y))
 
+        theta_pred = self.net(h)
 
-# -------------- Old Utils ------------ #
-@torch.no_grad()
-def rollout_aline_policy(cfg, aline_model, experiment, batch_size, T, device):
-    """
-    Rolls out a frozen ALINE policy and returns histories.
-
-    Returns:
-        xi_history: [B, T, dim_x]
-        y_history:  [B, T, dim_y]
-        theta:      [B, n_sources, source_dim] or [B, theta_dim]
-    """
-
-    aline_model.eval()
-
-    batch = experiment.sample_batch(batch_size)
-
-    xi_hist = []
-    y_hist = []
-
-    for t in range(T):
-        if cfg.time_token:
-            batch.t = torch.tensor([t / T], device=device)
-
-        pred = aline_model.forward(batch)
-        design_out = pred.design_out
-
-        idx = design_out.idx.squeeze(-1)  # [B]
-
-        batch_indices = torch.arange(batch_size, device=device)
-        xi_t = batch.query_x[batch_indices, idx]  # [B, dim_x]
-
-        batch = experiment.update_batch(batch, design_out.idx)
-
-        y_t = batch.context_y[:, -1, :]  # [B, dim_y]
-
-        xi_hist.append(xi_t)
-        y_hist.append(y_t)
-
-    xi_history = torch.stack(xi_hist, dim=1)  # [B, T, dim_x]
-    y_history = torch.stack(y_hist, dim=1)    # [B, T, dim_y]
-
-    theta = batch.theta if hasattr(batch, "theta") else batch.target_all
-
-    return xi_history, y_history, theta
-
-
-def two_source_logmse_loss_old(theta_pred, theta_true, eps=1e-6):
-    """
-    Permutation-invariant log-MSE-style loss for two 2D sources.
-
-    Per-coordinate loss:
-        err**2 + log(err**2 + eps)
-
-    theta_pred: [B, 2, 2]
-    theta_true: [B, 2, 2]
-    """
-
-    err_id = theta_pred - theta_true
-    loss_id = (err_id ** 2 + torch.log(err_id ** 2 + eps)).mean(dim=(1, 2))
-
-    theta_true_swapped = theta_true[:, [1, 0], :]
-    err_swap = theta_pred - theta_true_swapped
-    loss_swap = (err_swap ** 2 + torch.log(err_swap ** 2 + eps)).mean(dim=(1, 2))
-
-    loss = torch.minimum(loss_id, loss_swap)
-
-    return loss.mean()
-
+        return theta_pred
+    
 
 # -------------- Utils ------------ #
 @torch.inference_mode()
 def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, device):
     """
-    Faster rollout for frozen ALINE policy.
+    Rollout frozen ALINE policy.
 
     Returns:
-        xi_history: [B, T, dim_x]
-        y_history:  [B, T, dim_y]
-        theta:      [B, K, dim_theta] or [B, theta_dim]
+        x_history: [B, T, dim_x]
+            Usually augmented ALINE input:
+            x_t = [xi_t, y_{t-1}, time_t]
+
+        y_history: [B, T, dim_y]
+            Usually observed increments delta_y_t, or raw y_t depending on wrapper.
+
+        theta: [B, dim_theta]
     """
 
     aline_model.eval()
@@ -177,7 +110,7 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
     dim_x = batch.query_x.shape[-1]
     dim_y = batch.context_y.shape[-1]
 
-    xi_history = torch.empty(B, T, dim_x, device=device)
+    x_history = torch.empty(B, T, dim_x, device=device)
     y_history = torch.empty(B, T, dim_y, device=device)
 
     batch_indices = torch.arange(B, device=device)
@@ -200,7 +133,8 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
 
         idx_flat = idx_update.squeeze(1)
 
-        xi_history[:, t] = batch.query_x[batch_indices, idx_flat]
+        selected_x = batch.query_x[batch_indices, idx_flat]
+        x_history[:, t] = selected_x
 
         batch = experiment.update_batch(batch, idx_update)
 
@@ -208,70 +142,66 @@ def rollout_aline_policy_fast(cfg, aline_model, experiment, batch_size, T, devic
 
     theta = batch.target_all if hasattr(batch, "target_all") else batch.theta
 
-    return xi_history, y_history, theta
+    return x_history, y_history, theta
 
 
-def two_source_mse_loss(theta_pred, theta_true):
+def theta_mse_loss(theta_pred, theta_true):
     """
-    Permutation-invariant MSE for two 2D sources.
-
-    theta_pred: [B, 2, 2]
-    theta_true: [B, 2, 2]
+    theta_pred: [B, dim_theta]
+    theta_true: [B, dim_theta]
     """
-
-    loss_id = ((theta_pred - theta_true) ** 2).mean(dim=(1, 2))
-
-    theta_true_swapped = theta_true[:, [1, 0], :]
-    loss_swap = ((theta_pred - theta_true_swapped) ** 2).mean(dim=(1, 2))
-
-    loss = torch.minimum(loss_id, loss_swap)
-
-    return loss.mean()
+    return ((theta_pred - theta_true) ** 2).mean()
 
 
-def canonicalize_sources_by_norm(theta):
+def theta_logmse_loss(theta_pred, theta_true, eps=1e-6):
     """
-    Canonicalize source order by increasing Euclidean norm.
-
-    theta: [B, K, D]
-
-    Returns:
-        theta_sorted: [B, K, D]
-    """
-
-    norms = torch.linalg.norm(theta, dim=-1)          # [B, K]
-    order = torch.argsort(norms, dim=1)               # [B, K]
-
-    gather_idx = order.unsqueeze(-1).expand_as(theta) # [B, K, D]
-    theta_sorted = torch.gather(theta, dim=1, index=gather_idx)
-
-    return theta_sorted
-
-
-def two_source_logmse_loss(theta_pred, theta_true, eps=1e-6):
-    """
-    Canonicalized log-MSE-style loss for two 2D sources.
-
-    Sources are ordered by increasing Euclidean norm before computing the loss.
+    Log-MSE-style loss for ordered theta vectors.
 
     Per-coordinate loss:
         err**2 + log(err**2 + eps)
 
-    theta_pred: [B, 2, 2]
-    theta_true: [B, 2, 2]
+    theta_pred: [B, dim_theta]
+    theta_true: [B, dim_theta]
     """
+    err2 = (theta_pred - theta_true) ** 2
+    loss = err2 + torch.log(err2 + eps)
+    return loss.mean()
 
-    theta_pred = canonicalize_sources_by_norm(theta_pred)
-    theta_true = canonicalize_sources_by_norm(theta_true)
 
-    err = theta_pred - theta_true
+def theta_weighted_mse_loss(theta_pred, theta_true, weights):
+    """
+    Weighted MSE over theta coordinates.
 
-    loss = err ** 2 + torch.log(err ** 2 + eps)
-    loss = loss.mean(dim=(1, 2))
+    theta_pred: [B, dim_theta]
+    theta_true: [B, dim_theta]
+    weights:    [dim_theta] or list/tuple of length dim_theta
+
+    Example:
+        weights = torch.tensor([1.0, 10.0, 1.0], device=device)
+    """
+    if not torch.is_tensor(weights):
+        weights = torch.tensor(weights, device=theta_pred.device, dtype=theta_pred.dtype)
+    else:
+        weights = weights.to(device=theta_pred.device, dtype=theta_pred.dtype)
+
+    if weights.ndim != 1:
+        raise ValueError(f"weights must be 1D, got shape {weights.shape}")
+
+    if weights.shape[0] != theta_pred.shape[-1]:
+        raise ValueError(
+            f"weights length must match dim_theta={theta_pred.shape[-1]}, "
+            f"got {weights.shape[0]}"
+        )
+
+    err2 = (theta_pred - theta_true) ** 2
+
+    # [B, dim_theta] * [dim_theta]
+    loss = err2 * weights
 
     return loss.mean()
 
 
+# -------------- Training ------------ #
 def train_downstream_from_pretrained_aline(
     cfg,
     logger,
@@ -284,7 +214,7 @@ def train_downstream_from_pretrained_aline(
     device,
 ):
     """
-    Train only the downstream MLP.
+    Train only the downstream theta predictor.
     ALINE is frozen and used as acquisition/design policy.
     """
 
@@ -309,8 +239,7 @@ def train_downstream_from_pretrained_aline(
         downstream_net.train()
         optimizer.zero_grad()
 
-        #xi_history, y_history, theta = rollout_aline_policy(
-        xi_history, y_history, theta = rollout_aline_policy_fast(
+        x_history, y_history, theta = rollout_aline_policy_fast(
             cfg=cfg,
             aline_model=aline_model,
             experiment=experiment,
@@ -320,23 +249,30 @@ def train_downstream_from_pretrained_aline(
         )
 
         theta = theta.to(device)
+        theta = theta.view(batch_size, cfg.task.n_target_theta)
 
-        # Expected target shape: [B, 2, 2]
-        theta = theta.view(batch_size, cfg.task.K, cfg.task.dim_x)
-
-        theta_pred = downstream_net(xi_history, y_history)
+        theta_pred = downstream_net(x_history, y_history)
 
         if cfg.downstream.loss == "mse":
-            loss = two_source_mse_loss(theta_pred, theta)
+            loss = theta_mse_loss(theta_pred, theta)
+
         elif cfg.downstream.loss == "logmse":
-            loss = two_source_logmse_loss(
+            loss = theta_logmse_loss(
                 theta_pred,
                 theta,
                 eps=getattr(cfg.downstream, "eps_loss", 1e-6),
             )
+
+        elif cfg.downstream.loss == "weighted_mse":
+            loss = theta_weighted_mse_loss(
+                theta_pred,
+                theta,
+                weights=cfg.downstream.theta_weights,
+            )
+
         else:
             raise ValueError(f"Unknown downstream loss: {cfg.downstream.loss}")
-
+        
         loss.backward()
 
         if getattr(cfg.downstream, "clip_grads", False):
@@ -367,6 +303,7 @@ def train_downstream_from_pretrained_aline(
     return losses
 
 
+# -------------- Main ------------ #
 @hydra.main(version_base=None, config_path="./config", config_name="train")
 def main(cfg):
     # Device setup
@@ -491,8 +428,7 @@ def main(cfg):
         dim_x=cfg.task.dim_x,
         dim_y=cfg.task.dim_y,
         T=cfg.T,
-        n_sources=cfg.task.K,
-        source_dim=cfg.task.dim_x,
+        dim_theta=cfg.task.n_target_theta,
         hidden_dims=tuple(cfg.downstream.hidden_dims),
         activation=cfg.downstream.activation,
         dropout=cfg.downstream.dropout,
