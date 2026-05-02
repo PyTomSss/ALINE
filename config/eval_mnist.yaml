@@ -43,7 +43,8 @@ beta: 1
 # --------------------
 # Evaluation only
 # --------------------
-eval_checkpoint: checkpoints/61895_1/checkpoints_after_burning/model/aline_classif_MaskedMNIST_p5_q128_T5_1_epoch_55000.pth
+#eval_checkpoint: checkpoints/61991_1/model/aline_classif_MaskedMNIST_p5_q128_T5_1.pth     #90k steps 
+eval_checkpoint: checkpoints/61895_1/model/aline_classif_MaskedMNIST_p5_q128_T5_1.pth      #60k steps 
 
 T_eval: 5
 eval_batch_size_classif: 256

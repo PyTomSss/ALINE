@@ -49,8 +49,9 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: mse
+  loss: logmse
   eps_loss: 1e-6
+  theta_weights: [0.1, 1.0, 2.0]
 
   # Logging / checkpoints
   verbose: 5000000
