@@ -3,7 +3,7 @@ defaults:
   - encoder: encoder
   - embedder: embedder
   - head: head
-  - task: double_pendulum
+  - task: pendulum
 
 seed: 123
 fix_seed: True
@@ -52,7 +52,7 @@ downstream:
   clip_grads: True
   loss: weighted_mse
   eps_loss: 1e-6
-  theta_weights: [1.0, 1.0, 2.0, 3.0]
+  theta_weights: [0.1, 1.0, 2.0]
 
   # Logging / checkpoints
   verbose: 5000000
