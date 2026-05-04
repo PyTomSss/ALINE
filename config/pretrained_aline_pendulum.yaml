@@ -31,7 +31,7 @@ train_aline: False
 # Downstream theta predictor
 # -------------------------
 downstream:
-  max_epoch: 50000
+  max_epoch: 80000
 
   # Optimizer
   optimizer: AdamW
@@ -50,7 +50,7 @@ downstream:
 
   # Training
   clip_grads: True
-  loss: weighted_mse
+  loss: mse
   eps_loss: 1e-6
   theta_weights: [0.1, 1.0, 2.0]
 
